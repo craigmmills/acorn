@@ -5,6 +5,7 @@ IFS=$'\n\t'
 SCRIPT_NAME="acorn"
 PROJECTS_DIR="${HOME}/Projects"
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
+AUTO_TRIGGER_MESSAGE="let's draft this"
 
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*" >&2; }
@@ -13,12 +14,12 @@ die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage:
-  acorn create <repo> <issue-number>
+  acorn create <repo> <issue-number> [--no-auto]
   acorn list [repo]
   acorn approve <repo> <slug>
   acorn clean <repo> <slug> [--remove-labels] [--yes]
   acorn issue create <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]...
-  acorn issue plan <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]...
+  acorn issue plan <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]... [--no-auto]
 EOF
 }
 
@@ -422,6 +423,7 @@ start_session_via_tmux() {
   local repo="$1"
   local slug="$2"
   local worktree_path="$3"
+  local auto_message="${4:-}"
   local session_name
   session_name="$(canonical_session_name "$repo" "$slug")"
 
@@ -434,6 +436,10 @@ start_session_via_tmux() {
 
   tmux new-session -d -s "$session_name" -c "$worktree_path"
   tmux send-keys -t "$session_name" "pi" C-m || true
+  if [ -n "$auto_message" ]; then
+    sleep 1
+    tmux send-keys -t "$session_name" "$auto_message" C-m || true
+  fi
   printf '%s\n%s' "tmux" "$session_name"
 }
 
@@ -441,6 +447,7 @@ start_session() {
   local repo="$1"
   local slug="$2"
   local spec_path="$3"
+  local auto_message="${4:-}"
 
   local result
   if result="$(start_session_via_dev "$repo" "$slug" "$spec_path")"; then
@@ -449,7 +456,29 @@ start_session() {
   fi
 
   warn "dev backend unavailable or failed; falling back to tmux"
-  start_session_via_tmux "$repo" "$slug" "$spec_path"
+  start_session_via_tmux "$repo" "$slug" "$spec_path" "$auto_message"
+}
+
+send_auto_trigger() {
+  local session_name="$1"
+  local message="$2"
+
+  if ! command -v tmux >/dev/null 2>&1; then
+    warn "Cannot auto-trigger planning: tmux not installed"
+    return 1
+  fi
+
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+      tmux send-keys -t "$session_name" "$message" C-m || true
+      return 0
+    fi
+    sleep 1
+  done
+
+  warn "Could not auto-trigger planning in session $session_name"
+  return 1
 }
 
 kill_session() {
@@ -623,6 +652,20 @@ list_specs_all() {
 cmd_create() {
   local repo="$1"
   local issue_number="$2"
+  shift 2
+
+  local auto_trigger=1
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --no-auto)
+        auto_trigger=0
+        ;;
+      *)
+        die "Unknown option for create: $1"
+        ;;
+    esac
+    shift
+  done
 
   require_cmds gh jq tmux
   local repo_main
@@ -671,6 +714,7 @@ cmd_create() {
   fi
 
   local alive=0
+  local started_new_session=0
   if [ -n "$session_name" ] && command -v tmux >/dev/null 2>&1; then
     if tmux has-session -t "$session_name" 2>/dev/null; then
       alive=1
@@ -679,9 +723,20 @@ cmd_create() {
 
   if [ "$alive" -eq 0 ]; then
     local session_result
-    session_result="$(start_session "$repo" "$slug" "$dir")"
+    local auto_message=""
+    if [ "$auto_trigger" -eq 1 ]; then
+      auto_message="$AUTO_TRIGGER_MESSAGE"
+    fi
+    session_result="$(start_session "$repo" "$slug" "$dir" "$auto_message")"
     backend="$(printf '%s' "$session_result" | head -n1)"
     session_name="$(printf '%s' "$session_result" | tail -n1)"
+    started_new_session=1
+  fi
+
+  if [ "$auto_trigger" -eq 1 ] && [ "$started_new_session" -eq 1 ] && [ "$backend" = "dev" ]; then
+    if send_auto_trigger "$session_name" "$AUTO_TRIGGER_MESSAGE"; then
+      info "Auto-trigger sent to session: $AUTO_TRIGGER_MESSAGE"
+    fi
   fi
 
   write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "$backend" "$session_name"
@@ -691,7 +746,16 @@ cmd_create() {
   echo "Session: $session_name"
   echo "Backend: $backend"
   echo "Attach: tmux attach -t $session_name"
-  echo "Suggested trigger: say \"let's draft this\" in the planning session"
+  if [ "$auto_trigger" -eq 1 ]; then
+    if [ "$started_new_session" -eq 1 ]; then
+      echo "Auto-trigger: attempted \"$AUTO_TRIGGER_MESSAGE\""
+    else
+      echo "Auto-trigger: skipped (session already running)"
+    fi
+  else
+    echo "Auto-trigger: disabled (--no-auto)"
+    echo "Manual trigger: say \"$AUTO_TRIGGER_MESSAGE\" in the planning session"
+  fi
 }
 
 cmd_list() {
@@ -909,8 +973,22 @@ cmd_issue_plan() {
   local title="$2"
   shift 2
 
+  local auto_flag=""
+  local issue_args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --no-auto)
+        auto_flag="--no-auto"
+        ;;
+      *)
+        issue_args+=("$1")
+        ;;
+    esac
+    shift
+  done
+
   local result issue_num issue_url
-  result="$(create_issue_in_repo "$repo" "$title" "$@")"
+  result="$(create_issue_in_repo "$repo" "$title" "${issue_args[@]}")"
   issue_num="$(printf '%s' "$result" | sed -n '1p')"
   issue_url="$(printf '%s' "$result" | sed -n '2p')"
 
@@ -918,7 +996,11 @@ cmd_issue_plan() {
   echo "Issue: #$issue_num"
   echo "URL: $issue_url"
   echo "Starting spec creation..."
-  cmd_create "$repo" "$issue_num"
+  if [ -n "$auto_flag" ]; then
+    cmd_create "$repo" "$issue_num" "$auto_flag"
+  else
+    cmd_create "$repo" "$issue_num"
+  fi
 }
 
 main() {
@@ -930,8 +1012,8 @@ main() {
 
   case "$cmd" in
     create)
-      [ "$#" -eq 3 ] || { usage; exit 1; }
-      cmd_create "$2" "$3"
+      [ "$#" -ge 3 ] || { usage; exit 1; }
+      cmd_create "$2" "$3" "${@:4}"
       ;;
     list)
       if [ "$#" -gt 2 ]; then
