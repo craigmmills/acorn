@@ -865,12 +865,12 @@ create_issue_in_repo() {
   fi
 
   local label
-  for label in "${labels[@]}"; do
+  for label in "${labels[@]+"${labels[@]}"}"; do
     create_args+=(--label "$label")
   done
 
   local assignee
-  for assignee in "${assignees[@]}"; do
+  for assignee in "${assignees[@]+"${assignees[@]}"}"; do
     create_args+=(--assignee "$assignee")
   done
 
@@ -923,6 +923,11 @@ cmd_issue_plan() {
 
 main() {
   local cmd="${1:-}"
+  local subcmd
+  local repo
+  local slug
+  local title
+
   case "$cmd" in
     create)
       [ "$#" -eq 3 ] || { usage; exit 1; }
@@ -941,18 +946,28 @@ main() {
       ;;
     clean)
       [ "$#" -ge 3 ] || { usage; exit 1; }
-      cmd_clean "$2" "$3" "${@:4}"
+      repo="$2"
+      slug="$3"
+      shift 3
+      cmd_clean "$repo" "$slug" "$@"
       ;;
     issue)
       [ "$#" -ge 2 ] || { usage; exit 1; }
-      case "$2" in
+      subcmd="$2"
+      case "$subcmd" in
         create)
           [ "$#" -ge 4 ] || { usage; exit 1; }
-          cmd_issue_create "$3" "$4" "${@:5}"
+          repo="$3"
+          title="$4"
+          shift 4
+          cmd_issue_create "$repo" "$title" "$@"
           ;;
         plan)
           [ "$#" -ge 4 ] || { usage; exit 1; }
-          cmd_issue_plan "$3" "$4" "${@:5}"
+          repo="$3"
+          title="$4"
+          shift 4
+          cmd_issue_plan "$repo" "$title" "$@"
           ;;
         *)
           usage
