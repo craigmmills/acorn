@@ -1,0 +1,973 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+SCRIPT_NAME="acorn"
+PROJECTS_DIR="${HOME}/Projects"
+LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
+
+info() { printf '[INFO] %s\n' "$*"; }
+warn() { printf '[WARN] %s\n' "$*" >&2; }
+die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage:
+  acorn create <repo> <issue-number>
+  acorn list [repo]
+  acorn approve <repo> <slug>
+  acorn clean <repo> <slug> [--remove-labels] [--yes]
+  acorn issue create <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]...
+  acorn issue plan <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]...
+EOF
+}
+
+require_cmds() {
+  local missing=()
+  local cmd
+  for cmd in "$@"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing+=("$cmd")
+    fi
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    die "Missing required command(s): ${missing[*]}"
+  fi
+}
+
+repo_main_path() {
+  local repo="$1"
+  printf '%s/%s/main' "$PROJECTS_DIR" "$repo"
+}
+
+spec_root() {
+  local repo="$1"
+  printf '%s/.specs' "$(repo_main_path "$repo")"
+}
+
+spec_dir() {
+  local repo="$1"
+  local slug="$2"
+  printf '%s/%s' "$(spec_root "$repo")" "$slug"
+}
+
+safe_repo_main() {
+  local repo="$1"
+  local repo_main
+  repo_main="$(repo_main_path "$repo")"
+  [ -d "$repo_main" ] || die "Repo path not found: $repo_main"
+  printf '%s' "$repo_main"
+}
+
+slugify_title() {
+  local title="$1"
+  local s
+  if command -v iconv >/dev/null 2>&1; then
+    s="$(printf '%s' "$title" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || printf '%s' "$title")"
+  else
+    s="$title"
+  fi
+
+  s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')"
+  s="$(printf '%s' "$s" | tr ' _' '--')"
+  s="$(printf '%s' "$s" | sed -E 's/[^a-z0-9-]+/-/g; s/-+/-/g; s/^-+//; s/-+$//')"
+  s="$(printf '%s' "$s" | cut -c1-50)"
+  s="$(printf '%s' "$s" | sed -E 's/-+$//')"
+
+  if [ -z "$s" ]; then
+    s="issue"
+  fi
+  printf '%s' "$s"
+}
+
+build_slug() {
+  local issue_number="$1"
+  local title="$2"
+  printf '%s-%s' "$issue_number" "$(slugify_title "$title")"
+}
+
+canonical_session_name() {
+  local repo="$1"
+  local slug="$2"
+  local session="acorn:${repo}:${slug}"
+  session="$(printf '%s' "$session" | sed -E 's#[[:space:]/]+#-#g; s/[^A-Za-z0-9:_.-]/-/g; s/-+/-/g')"
+  printf '%s' "$session"
+}
+
+issue_number_from_slug() {
+  local slug="$1"
+  printf '%s' "$slug" | sed -nE 's/^([0-9]+)-.*/\1/p'
+}
+
+gh_issue_json() {
+  local repo_main="$1"
+  local issue_number="$2"
+  (
+    cd "$repo_main"
+    gh issue view "$issue_number" --json number,title,body,labels,comments,url,assignees
+  )
+}
+
+ensure_labels() {
+  local repo_main="$1"
+  local label
+  for label in "${LIFECYCLE_LABELS[@]}"; do
+    (
+      cd "$repo_main"
+      gh label create "$label" --color "0052cc" --description "Acorn spec lifecycle" >/dev/null 2>&1
+    ) || true
+  done
+}
+
+remove_issue_label_soft() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local label="$3"
+  (
+    cd "$repo_main"
+    gh issue edit "$issue_number" --remove-label "$label" >/dev/null 2>&1
+  ) || warn "Unable to remove label '$label' from issue #$issue_number"
+}
+
+add_issue_label_hard() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local label="$3"
+  (
+    cd "$repo_main"
+    gh issue edit "$issue_number" --add-label "$label" >/dev/null
+  ) || die "Failed adding label '$label' on issue #$issue_number"
+}
+
+set_issue_state_label() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local target="$3"
+  local label
+
+  for label in "${LIFECYCLE_LABELS[@]}"; do
+    if [ "$label" != "$target" ]; then
+      remove_issue_label_soft "$repo_main" "$issue_number" "$label"
+    fi
+  done
+
+  add_issue_label_hard "$repo_main" "$issue_number" "$target"
+}
+
+comment_issue() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local body="$3"
+  (
+    cd "$repo_main"
+    gh issue comment "$issue_number" --body "$body" >/dev/null
+  ) || warn "Failed posting comment on issue #$issue_number"
+}
+
+planning_block() {
+  cat <<'EOF'
+## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS
+
+> **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
+>
+> When the user says "let's draft this" (or any variation like "draft it", "start planning", "go", etc.),
+> you MUST execute the 5-stage multi-agent pipeline described below.
+>
+> **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
+> **DO NOT say "I'll draft a plan" — you MUST say "I'll launch 6 parallel sub-agents to draft plans."**
+>
+> If you write ANY plan content yourself instead of delegating to sub-agents via the Task tool,
+> you have FAILED. Your ONLY job is to launch Task agents and wait for them to finish.
+
+> **RULES FOR SUB-AGENTS (include these in every sub-agent prompt):**
+>
+> - Sub-agents write ALL work to files using Write/Edit tools
+> - Sub-agents return ONLY: `Done. Output: [filepath]`
+> - Sub-agents MUST write in chunks of ~4000 tokens max (Write tool, then Edit to append)
+> - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
+> - Violation of these rules will blow up the orchestrator's context window
+
+---
+
+### Overview
+
+You MUST execute these 5 stages in order. Each stage MUST use the Task tool to launch sub-agents.
+You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the work yourself.
+
+1. **Stage 1**: YOU launch 6 parallel Task agents → each drafts an independent plan
+2. **Stage 2**: YOU launch 6 parallel Task agents → each critiques and rewrites a draft
+3. **Stage 3**: YOU launch 1 Task agent → synthesizes all drafts + critiques into master plan
+4. **Stage 4**: YOU launch 6 parallel Task agents → each simulates implementing the master plan
+5. **Stage 5**: YOU launch 1 Task agent → produces final plan from simulation findings
+
+Total: 20 Task agent launches across 5 stages. No shortcuts.
+
+---
+
+### Stage 1: Initial Parallel Drafting
+
+YOU MUST launch 6 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
+Each sub-agent gets assigned a number N (1 through 6).
+
+**Prompt for each sub-agent (replace N with 1-6):**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are sub-agent N. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory for full requirements and context.
+- Write a detailed, complete implementation plan to plans/draft_plan_N.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append more content.
+- NEVER write more than 4000 tokens in a single tool call — you will hit output limits and lose work.
+- Cover: architecture, file changes, data models, API design, error handling, testing strategy, migration plan.
+- Be specific — reference actual file paths, function names, and code patterns from the codebase.
+- Your final response to the orchestrator must be ONLY these exact words: "Done. Output: plans/draft_plan_N.md"
+- Do NOT return any content, summaries, analysis, or explanations. ONLY the done message.
+```
+
+**After all 6 complete:** Confirm all 6 files exist, then proceed to Stage 2. Do NOT read the files.
+
+---
+
+### Stage 2: Parallel Critique & Rewrite
+
+YOU MUST launch 6 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
+Each sub-agent gets assigned the same number N as their draft.
+
+**Prompt for each sub-agent (replace N with 1-6):**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are sub-agent N. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read plans/draft_plan_N.md — this is the draft you must critique.
+- Write a thorough critique AND an improved version of the plan to plans/critique_N.md
+- Critique for: correctness, robustness, missed requirements, poor decisions, missing error handling, gaps in testing, wrong assumptions about the codebase.
+- Check completeness against every requirement in PROMPT.md.
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/critique_N.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After all 6 complete:** Confirm all 6 files exist, then proceed to Stage 3. Do NOT read the files.
+
+---
+
+### Stage 3: Master Plan Synthesis
+
+YOU MUST launch 1 Task tool call. Use model "opus".
+
+**Prompt:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read ALL of these files: plans/draft_plan_1.md through plans/draft_plan_6.md AND plans/critique_1.md through plans/critique_6.md (12 files total).
+- Synthesize a master implementation plan that:
+  - Identifies where drafts AGREE (high confidence decisions)
+  - Identifies where drafts DISAGREE (needs resolution — pick the best approach and explain why)
+  - Incorporates critique findings and improvements
+  - Addresses risks and open questions raised across all drafts
+  - Resolves conflicts explicitly with reasoning
+- Write the master plan to plans/master_plan_draft.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/master_plan_draft.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After completion:** Confirm the file exists, then proceed to Stage 4. Do NOT read the file.
+
+---
+
+### Stage 4: Parallel Implementation Simulation
+
+YOU MUST launch 6 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
+
+**Prompt for each sub-agent (replace N with 1-6):**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are sub-agent N. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read plans/master_plan_draft.md — this is the master plan you must simulate implementing.
+- Perform a detailed DRY RUN of implementing this entire plan:
+  - Walk through each step as if you were actually writing the code
+  - Identify what works well and what would break
+  - Find missing pieces, unstated assumptions, ordering issues
+  - Document gotchas, edge cases, and things the plan doesn't account for
+  - Note any steps that are ambiguous or underspecified
+- Write your simulation findings to plans/simulation_N.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/simulation_N.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After all 6 complete:** Confirm all 6 files exist, then proceed to Stage 5. Do NOT read the files.
+
+---
+
+### Stage 5: Final Master Plan
+
+YOU MUST launch 1 Task tool call. Use model "opus".
+
+**Prompt:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read plans/master_plan_draft.md (the master plan).
+- Read ALL of: plans/simulation_1.md through plans/simulation_6.md (6 simulation files).
+- Produce the FINAL, COMPLETE implementation plan that:
+  - Incorporates all simulation findings
+  - Fixes every issue identified during simulation
+  - Fills in every gap and ambiguity
+  - Is ready to be handed to a developer for implementation with zero questions
+  - Includes specific file paths, function signatures, data models, and step-by-step instructions
+- Write the final plan to plans/SPEC.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/SPEC.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After completion:** Read plans/SPEC.md and present it to the user. This is the ONLY file you read.
+
+---
+
+### Orchestrator Context Management — CRITICAL
+
+**Your context is precious. Sub-agents have their own 200k token contexts. You do NOT.**
+
+- Your ONLY job is to launch Task agents and confirm they completed. That's it.
+- You need ~1k tokens per stage. If your context grows beyond ~20k tokens, you broke a rule.
+- NEVER read sub-agent output files yourself (the ONLY exception: plans/SPEC.md at the very end)
+- NEVER consume sub-agent return messages beyond confirming the word "Done"
+- NEVER write plan content yourself — that's what the 20 sub-agents are for
+- If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
+EOF
+}
+
+render_comments_block() {
+  local issue_json="$1"
+  printf '%s\n' "$issue_json" | jq -r '
+    if (.comments | length) == 0 then
+      "_No discussion comments yet._"
+    else
+      .comments[] |
+      "### Comment by @\(.author.login // "unknown") on \(.updatedAt // .createdAt // "unknown-time")\n\n\(.body // "")\n"
+    end
+  '
+}
+
+render_prompt_md() {
+  local issue_title="$1"
+  local issue_body="$2"
+  local issue_json="$3"
+  local out_tmp="$4"
+
+  {
+    printf '# Feature Spec: %s\n\n' "$issue_title"
+    printf '## Requirements\n\n'
+    if [ -n "$issue_body" ]; then
+      printf '%s\n\n' "$issue_body"
+    else
+      printf '_No issue body provided._\n\n'
+    fi
+
+    printf '## Discussion / Context\n\n'
+    render_comments_block "$issue_json"
+    printf '\n---\n\n'
+    planning_block
+    printf '\n\n---\n\n'
+    cat <<'EOF'
+## Completion Protocol
+
+When implementation is complete, the implementing agent must:
+
+1. Create or update `DONE.md` in the spec directory.
+2. Include the exact test commands run and their outcomes.
+3. Summarize file changes and rationale in concise bullet points.
+4. List any follow-up risks or deferred work.
+EOF
+  } > "$out_tmp"
+}
+
+validate_prompt_md() {
+  local prompt_path="$1"
+  grep -q 'PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS' "$prompt_path" || return 1
+  return 0
+}
+
+start_session_via_dev() {
+  local repo="$1"
+  local slug="$2"
+  local repo_main="$3"
+
+  if ! command -v dev >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local display_target="${repo}/specs/${slug}/pi"
+  if dev "$display_target" >/dev/null 2>&1; then
+    local actual
+    actual="$(printf '%s' "$display_target" | tr '/' '_')"
+    printf '%s\n%s' "dev" "$actual"
+    return 0
+  fi
+
+  return 1
+}
+
+start_session_via_tmux() {
+  local repo_main="$1"
+  local session_name="$2"
+
+  command -v tmux >/dev/null 2>&1 || return 1
+
+  if tmux has-session -t "$session_name" 2>/dev/null; then
+    printf '%s\n%s' "tmux" "$session_name"
+    return 0
+  fi
+
+  tmux new-session -d -s "$session_name" -c "$repo_main"
+  tmux send-keys -t "$session_name" "pi" C-m || true
+  printf '%s\n%s' "tmux" "$session_name"
+}
+
+start_session() {
+  local repo="$1"
+  local slug="$2"
+  local spec_path="$3"
+
+  local canonical
+  canonical="$(canonical_session_name "$repo" "$slug")"
+
+  local result
+  if result="$(start_session_via_dev "$repo" "$slug" "$spec_path")"; then
+    printf '%s' "$result"
+    return 0
+  fi
+
+  warn "dev backend unavailable or failed; falling back to tmux"
+  start_session_via_tmux "$spec_path" "$canonical"
+}
+
+kill_session() {
+  local backend="$1"
+  local session_name="$2"
+  local repo="$3"
+  local slug="$4"
+
+  if [ -n "$session_name" ] && command -v tmux >/dev/null 2>&1; then
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+      tmux kill-session -t "$session_name" >/dev/null 2>&1 || warn "Failed to kill session $session_name"
+      return 0
+    fi
+  fi
+
+  if command -v tmux >/dev/null 2>&1; then
+    local candidates
+    candidates="$(tmux list-sessions -F '#S' 2>/dev/null | grep -E "(acorn:${repo}:${slug}|${repo}_specs_${slug}_pi)" || true)"
+    if [ -n "$candidates" ]; then
+      while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        tmux kill-session -t "$s" >/dev/null 2>&1 || warn "Failed killing fallback session $s"
+      done <<< "$candidates"
+    else
+      warn "No active session found for $slug"
+    fi
+  fi
+}
+
+write_meta_json() {
+  local path="$1"
+  local repo="$2"
+  local issue_number="$3"
+  local issue_title="$4"
+  local slug="$5"
+  local backend="$6"
+  local session_name="$7"
+
+  local ts
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  jq -n \
+    --arg repo "$repo" \
+    --argjson issue_number "$issue_number" \
+    --arg issue_title "$issue_title" \
+    --arg slug "$slug" \
+    --arg created_at "$ts" \
+    --arg session_backend "$backend" \
+    --arg session_name "$session_name" \
+    '{repo:$repo, issue_number:$issue_number, issue_title:$issue_title, slug:$slug, created_at:$created_at, session_backend:$session_backend, session_name:$session_name}' \
+    > "$path"
+}
+
+file_mtime_epoch() {
+  local path="$1"
+  if stat -f '%m' "$path" >/dev/null 2>&1; then
+    stat -f '%m' "$path"
+  else
+    stat -c '%Y' "$path"
+  fi
+}
+
+human_age() {
+  local epoch="$1"
+  local now
+  now="$(date +%s)"
+  local diff=$((now - epoch))
+  if [ "$diff" -lt 60 ]; then
+    printf '%ss' "$diff"
+  elif [ "$diff" -lt 3600 ]; then
+    printf '%sm' $((diff / 60))
+  elif [ "$diff" -lt 86400 ]; then
+    printf '%sh' $((diff / 3600))
+  else
+    printf '%sd' $((diff / 86400))
+  fi
+}
+
+status_for_spec() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local spec_path="$3"
+
+  local prompt_exists=0
+  local final_exists=0
+  [ -f "$spec_path/PROMPT.md" ] && prompt_exists=1
+  [ -f "$spec_path/plans/SPEC.md" ] && final_exists=1
+
+  local labels_json='[]'
+  if [ -n "$issue_number" ]; then
+    labels_json="$(
+      cd "$repo_main"
+      gh issue view "$issue_number" --json labels 2>/dev/null | jq -c '.labels // []'
+    )" || true
+  fi
+
+  local has_approved=0
+  local has_in_progress=0
+  if printf '%s' "$labels_json" | jq -e '.[] | select(.name == "spec-approved")' >/dev/null 2>&1; then
+    has_approved=1
+  fi
+  if printf '%s' "$labels_json" | jq -e '.[] | select(.name == "spec-in-progress")' >/dev/null 2>&1; then
+    has_in_progress=1
+  fi
+
+  if [ "$has_approved" -eq 1 ]; then
+    printf 'approved'
+  elif [ "$final_exists" -eq 1 ]; then
+    printf 'review'
+  elif [ "$has_in_progress" -eq 1 ] || [ "$prompt_exists" -eq 1 ]; then
+    printf 'planning'
+  else
+    printf 'unknown'
+  fi
+
+  if [ "$has_approved" -eq 1 ] && [ "$final_exists" -eq 0 ]; then
+    warn "Drift: approved label present but missing plans/SPEC.md at $spec_path"
+  fi
+}
+
+print_list_header() {
+  printf '%-16s %-8s %-40s %-10s %-8s %s\n' "repo" "issue" "slug" "status" "age" "spec_path"
+}
+
+print_list_row() {
+  local repo="$1"
+  local issue="$2"
+  local slug="$3"
+  local status="$4"
+  local age="$5"
+  local path="$6"
+  printf '%-16s %-8s %-40s %-10s %-8s %s\n' "$repo" "$issue" "$slug" "$status" "$age" "$path"
+}
+
+list_specs_for_repo() {
+  local repo="$1"
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  local root
+  root="$(spec_root "$repo")"
+  [ -d "$root" ] || return 0
+
+  local dir
+  for dir in "$root"/*; do
+    [ -d "$dir" ] || continue
+    local slug
+    slug="$(basename "$dir")"
+    local issue
+    issue="$(issue_number_from_slug "$slug")"
+    local status
+    status="$(status_for_spec "$repo_main" "$issue" "$dir")"
+    local age
+    age="$(human_age "$(file_mtime_epoch "$dir")")"
+    print_list_row "$repo" "${issue:-?}" "$slug" "$status" "$age" "$dir"
+  done
+}
+
+list_specs_all() {
+  local main_dir
+  for main_dir in "$PROJECTS_DIR"/*/main; do
+    [ -d "$main_dir" ] || continue
+    local repo
+    repo="$(basename "$(dirname "$main_dir")")"
+    if [ -d "$main_dir/.specs" ]; then
+      list_specs_for_repo "$repo"
+    fi
+  done
+}
+
+cmd_create() {
+  local repo="$1"
+  local issue_number="$2"
+
+  require_cmds gh jq tmux
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  info "Fetching issue #$issue_number"
+  local issue_json
+  issue_json="$(gh_issue_json "$repo_main" "$issue_number")" || die "Failed to fetch issue #$issue_number"
+
+  local title body slug root dir
+  title="$(printf '%s' "$issue_json" | jq -r '.title // "Untitled issue"')"
+  body="$(printf '%s' "$issue_json" | jq -r '.body // ""')"
+  slug="$(build_slug "$issue_number" "$title")"
+  root="$(spec_root "$repo")"
+  dir="$(spec_dir "$repo" "$slug")"
+
+  mkdir -p "$dir/plans"
+
+  local prompt_path="$dir/PROMPT.md"
+  if [ ! -f "$prompt_path" ]; then
+    local tmp_path="$prompt_path.tmp"
+    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path"
+    if ! validate_prompt_md "$tmp_path"; then
+      rm -f "$tmp_path"
+      die "Prompt generation failed: planning anchor missing"
+    fi
+    mv "$tmp_path" "$prompt_path"
+    info "Generated $prompt_path"
+  else
+    info "PROMPT.md already exists, leaving as-is"
+  fi
+
+  ensure_labels "$repo_main"
+  set_issue_state_label "$repo_main" "$issue_number" "spec-in-progress"
+
+  comment_issue "$repo_main" "$issue_number" "Spec started locally at: $dir"
+
+  local backend session_name
+  local meta_path="$dir/meta.json"
+  backend=""
+  session_name=""
+
+  if [ -f "$meta_path" ]; then
+    backend="$(jq -r '.session_backend // ""' "$meta_path" 2>/dev/null || true)"
+    session_name="$(jq -r '.session_name // ""' "$meta_path" 2>/dev/null || true)"
+  fi
+
+  local alive=0
+  if [ -n "$session_name" ] && command -v tmux >/dev/null 2>&1; then
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+      alive=1
+    fi
+  fi
+
+  if [ "$alive" -eq 0 ]; then
+    local session_result
+    session_result="$(start_session "$repo" "$slug" "$dir")"
+    backend="$(printf '%s' "$session_result" | head -n1)"
+    session_name="$(printf '%s' "$session_result" | tail -n1)"
+  fi
+
+  write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "$backend" "$session_name"
+
+  echo ""
+  echo "Created spec: $dir"
+  echo "Session: $session_name"
+  echo "Backend: $backend"
+  echo "Attach: tmux attach -t $session_name"
+  echo "Suggested trigger: say \"let's draft this\" in the planning session"
+}
+
+cmd_list() {
+  local repo="${1:-}"
+  require_cmds gh jq
+  print_list_header
+  if [ -n "$repo" ]; then
+    list_specs_for_repo "$repo"
+  else
+    list_specs_all
+  fi
+}
+
+cmd_approve() {
+  local repo="$1"
+  local slug="$2"
+
+  require_cmds gh jq
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+  local dir
+  dir="$(spec_dir "$repo" "$slug")"
+
+  [ -d "$dir" ] || die "Spec directory missing: $dir"
+  [ -f "$dir/plans/SPEC.md" ] || die "Missing final plan: $dir/plans/SPEC.md"
+
+  local issue_number
+  issue_number="$(issue_number_from_slug "$slug")"
+  [ -n "$issue_number" ] || die "Cannot infer issue number from slug: $slug"
+
+  set_issue_state_label "$repo_main" "$issue_number" "spec-approved"
+  comment_issue "$repo_main" "$issue_number" "Spec approved for implementation: $dir/plans/SPEC.md"
+
+  echo "Approved $slug (issue #$issue_number)"
+}
+
+cmd_clean() {
+  local repo="$1"
+  local slug="$2"
+  shift 2
+
+  local remove_labels=0
+  local yes=0
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --remove-labels)
+        remove_labels=1
+        ;;
+      --yes)
+        yes=1
+        ;;
+      *)
+        die "Unknown option for clean: $1"
+        ;;
+    esac
+    shift
+  done
+
+  require_cmds jq
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  local target
+  target="$(spec_dir "$repo" "$slug")"
+  local root
+  root="$(spec_root "$repo")"
+
+  case "$target" in
+    "$root"/*) ;;
+    *) die "Unsafe clean target path: $target" ;;
+  esac
+
+  if [ ! -d "$target" ]; then
+    warn "Spec directory missing (already clean): $target"
+    return 0
+  fi
+
+  if [ "$yes" -ne 1 ]; then
+    printf 'Delete spec directory %s ? [y/N] ' "$target"
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES) ;;
+      *)
+        info "Aborted"
+        return 0
+        ;;
+    esac
+  fi
+
+  local backend="" session_name=""
+  if [ -f "$target/meta.json" ]; then
+    backend="$(jq -r '.session_backend // ""' "$target/meta.json" 2>/dev/null || true)"
+    session_name="$(jq -r '.session_name // ""' "$target/meta.json" 2>/dev/null || true)"
+  fi
+
+  kill_session "$backend" "$session_name" "$repo" "$slug"
+
+  rm -rf "$target"
+  info "Removed $target"
+
+  if [ "$remove_labels" -eq 1 ]; then
+    require_cmds gh
+    local issue_number
+    issue_number="$(issue_number_from_slug "$slug")"
+    if [ -n "$issue_number" ]; then
+      local label
+      for label in "${LIFECYCLE_LABELS[@]}"; do
+        remove_issue_label_soft "$repo_main" "$issue_number" "$label"
+      done
+    else
+      warn "Could not infer issue number from slug; skipping label cleanup"
+    fi
+  fi
+}
+
+create_issue_in_repo() {
+  local repo="$1"
+  local title="$2"
+  shift 2
+
+  require_cmds gh
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  local body=""
+  local body_file=""
+  local labels=()
+  local assignees=()
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --body)
+        [ "$#" -ge 2 ] || die "--body requires a value"
+        body="$2"
+        shift 2
+        ;;
+      --body-file)
+        [ "$#" -ge 2 ] || die "--body-file requires a path"
+        body_file="$2"
+        shift 2
+        ;;
+      --label)
+        [ "$#" -ge 2 ] || die "--label requires a value"
+        labels+=("$2")
+        shift 2
+        ;;
+      --assignee)
+        [ "$#" -ge 2 ] || die "--assignee requires a value"
+        assignees+=("$2")
+        shift 2
+        ;;
+      *)
+        die "Unknown option for issue create/plan: $1"
+        ;;
+    esac
+  done
+
+  if [ -n "$body" ] && [ -n "$body_file" ]; then
+    die "Use either --body or --body-file, not both"
+  fi
+
+  if [ -n "$body_file" ]; then
+    [ -f "$body_file" ] || die "Body file not found: $body_file"
+    body="$(<"$body_file")"
+  fi
+
+  local create_args=(issue create --title "$title")
+  if [ -n "$body" ]; then
+    create_args+=(--body "$body")
+  fi
+
+  local label
+  for label in "${labels[@]}"; do
+    create_args+=(--label "$label")
+  done
+
+  local assignee
+  for assignee in "${assignees[@]}"; do
+    create_args+=(--assignee "$assignee")
+  done
+
+  local out
+  out="$(
+    cd "$repo_main"
+    gh "${create_args[@]}"
+  )" || die "Failed to create issue in $repo"
+
+  local issue_num issue_url
+  issue_num="$(printf '%s' "$out" | sed -nE 's#.*/issues/([0-9]+)$#\1#p')"
+  issue_url="$(printf '%s' "$out" | tail -n1)"
+
+  [ -n "$issue_num" ] || die "Could not parse issue number from gh output: $out"
+  printf '%s\n%s\n' "$issue_num" "$issue_url"
+}
+
+cmd_issue_create() {
+  local repo="$1"
+  local title="$2"
+  shift 2
+
+  local result issue_num issue_url
+  result="$(create_issue_in_repo "$repo" "$title" "$@")"
+  issue_num="$(printf '%s' "$result" | sed -n '1p')"
+  issue_url="$(printf '%s' "$result" | sed -n '2p')"
+
+  echo "Created issue in $repo"
+  echo "Issue: #$issue_num"
+  echo "URL: $issue_url"
+  echo "Next: acorn create $repo $issue_num"
+}
+
+cmd_issue_plan() {
+  local repo="$1"
+  local title="$2"
+  shift 2
+
+  local result issue_num issue_url
+  result="$(create_issue_in_repo "$repo" "$title" "$@")"
+  issue_num="$(printf '%s' "$result" | sed -n '1p')"
+  issue_url="$(printf '%s' "$result" | sed -n '2p')"
+
+  echo "Created issue in $repo"
+  echo "Issue: #$issue_num"
+  echo "URL: $issue_url"
+  echo "Starting spec creation..."
+  cmd_create "$repo" "$issue_num"
+}
+
+main() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    create)
+      [ "$#" -eq 3 ] || { usage; exit 1; }
+      cmd_create "$2" "$3"
+      ;;
+    list)
+      if [ "$#" -gt 2 ]; then
+        usage
+        exit 1
+      fi
+      cmd_list "${2:-}"
+      ;;
+    approve)
+      [ "$#" -eq 3 ] || { usage; exit 1; }
+      cmd_approve "$2" "$3"
+      ;;
+    clean)
+      [ "$#" -ge 3 ] || { usage; exit 1; }
+      cmd_clean "$2" "$3" "${@:4}"
+      ;;
+    issue)
+      [ "$#" -ge 2 ] || { usage; exit 1; }
+      case "$2" in
+        create)
+          [ "$#" -ge 4 ] || { usage; exit 1; }
+          cmd_issue_create "$3" "$4" "${@:5}"
+          ;;
+        plan)
+          [ "$#" -ge 4 ] || { usage; exit 1; }
+          cmd_issue_plan "$3" "$4" "${@:5}"
+          ;;
+        *)
+          usage
+          die "Unknown issue subcommand: $2"
+          ;;
+      esac
+      ;;
+    -h|--help|help|"")
+      usage
+      ;;
+    *)
+      usage
+      die "Unknown command: $cmd"
+      ;;
+  esac
+}
+
+main "$@"
