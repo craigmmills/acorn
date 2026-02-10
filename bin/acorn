@@ -89,8 +89,8 @@ build_slug() {
 canonical_session_name() {
   local repo="$1"
   local slug="$2"
-  local session="acorn:${repo}:${slug}"
-  session="$(printf '%s' "$session" | sed -E 's#[[:space:]/]+#-#g; s/[^A-Za-z0-9:_.-]/-/g; s/-+/-/g')"
+  local session="${repo}/specs/${slug}/pi"
+  session="$(printf '%s' "$session" | sed -E 's#[[:space:]/]+#_#g; s/[^A-Za-z0-9_.-]/-/g; s/_+/_/g; s/-+/-/g')"
   printf '%s' "$session"
 }
 
@@ -419,8 +419,11 @@ start_session_via_dev() {
 }
 
 start_session_via_tmux() {
-  local repo_main="$1"
-  local session_name="$2"
+  local repo="$1"
+  local slug="$2"
+  local worktree_path="$3"
+  local session_name
+  session_name="$(canonical_session_name "$repo" "$slug")"
 
   command -v tmux >/dev/null 2>&1 || return 1
 
@@ -429,7 +432,7 @@ start_session_via_tmux() {
     return 0
   fi
 
-  tmux new-session -d -s "$session_name" -c "$repo_main"
+  tmux new-session -d -s "$session_name" -c "$worktree_path"
   tmux send-keys -t "$session_name" "pi" C-m || true
   printf '%s\n%s' "tmux" "$session_name"
 }
@@ -439,9 +442,6 @@ start_session() {
   local slug="$2"
   local spec_path="$3"
 
-  local canonical
-  canonical="$(canonical_session_name "$repo" "$slug")"
-
   local result
   if result="$(start_session_via_dev "$repo" "$slug" "$spec_path")"; then
     printf '%s' "$result"
@@ -449,7 +449,7 @@ start_session() {
   fi
 
   warn "dev backend unavailable or failed; falling back to tmux"
-  start_session_via_tmux "$spec_path" "$canonical"
+  start_session_via_tmux "$repo" "$slug" "$spec_path"
 }
 
 kill_session() {
