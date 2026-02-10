@@ -122,18 +122,20 @@ This will:
 5. Set the issue label to `spec-in-progress`
 6. Post a comment on the issue with the spec location
 7. Start a detached tmux session with a Claude agent
+8. Automatically send the trigger message (`let's draft this`) to start planning
 
-After creation, attach to the session and tell the agent to start planning:
+Attach anytime to watch progress:
 
 ```bash
 # Attach to the session (session name is printed by acorn create)
 tmux attach -t <session-name>
-
-# In the session, trigger the planning pipeline:
-# Say "let's draft this" to the Claude agent
 ```
 
-The agent will then execute the full 5-stage pipeline autonomously.
+To opt out of auto-triggering:
+
+```bash
+acorn create myapp 42 --no-auto
+```
 
 ### List all specs
 
@@ -230,8 +232,8 @@ The orchestrator agent's only job is to launch sub-agents and confirm completion
 ## Command Reference
 
 ```
-acorn create <repo> <issue-number>
-    Create a spec from a GitHub issue and start a planning session
+acorn create <repo> <issue-number> [--no-auto]
+    Create a spec from a GitHub issue, start a planning session, and auto-trigger planning
 
 acorn list [repo]
     List all specs and their status (optionally filtered by repo)
@@ -245,7 +247,7 @@ acorn clean <repo> <slug> [--remove-labels] [--yes]
 acorn issue create <repo> <title> [options]
     Create a new GitHub issue
 
-acorn issue plan <repo> <title> [options]
+acorn issue plan <repo> <title> [options] [--no-auto]
     Create a GitHub issue and immediately start spec creation
 ```
 
