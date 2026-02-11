@@ -5,7 +5,7 @@ IFS=$'\n\t'
 SCRIPT_NAME="acorn"
 PROJECTS_DIR="${HOME}/Projects"
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
-AUTO_TRIGGER_MESSAGE="let's draft this"
+AUTO_TRIGGER_MESSAGE="Read PROMPT.md in the current directory. It contains the requirements and the mandatory 5-stage multi-agent planning methodology. Execute the full methodology now — begin with Stage 1 (launch 6 parallel drafting sub-agents)."
 
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*" >&2; }
@@ -98,6 +98,28 @@ canonical_session_name() {
 issue_number_from_slug() {
   local slug="$1"
   printf '%s' "$slug" | sed -nE 's/^([0-9]+)-.*/\1/p'
+}
+
+# Compute pi message queue file path for a given working directory.
+# Mirrors ~/.pi/agent/extensions/message-queue.ts:getQueueFile()
+compute_queue_file() {
+  local cwd_path="$1"
+  local safe_path
+  safe_path="$(printf '%s' "$cwd_path" | tr '[:upper:]' '[:lower:]' | tr '/' '-' | sed 's/^-//')"
+  printf '%s/.pi/queues/%s.jsonl' "$HOME" "$safe_path"
+}
+
+# Write a message to the pi message queue for a given working directory.
+# Pi polls this file every 500ms after session_start and delivers via sendUserMessage.
+queue_message() {
+  local cwd_path="$1"
+  local message="$2"
+  local mode="${3:-followUp}"
+  local queue_file
+  queue_file="$(compute_queue_file "$cwd_path")"
+  mkdir -p "$(dirname "$queue_file")"
+  jq -n --arg msg "$message" --arg mode "$mode" \
+    '{message: $msg, mode: $mode}' >> "$queue_file"
 }
 
 gh_issue_json() {
@@ -423,7 +445,6 @@ start_session_via_tmux() {
   local repo="$1"
   local slug="$2"
   local worktree_path="$3"
-  local auto_message="${4:-}"
   local session_name
   session_name="$(canonical_session_name "$repo" "$slug")"
 
@@ -436,10 +457,6 @@ start_session_via_tmux() {
 
   tmux new-session -d -s "$session_name" -c "$worktree_path"
   tmux send-keys -t "$session_name" "pi" C-m || true
-  if [ -n "$auto_message" ]; then
-    sleep 1
-    tmux send-keys -t "$session_name" "$auto_message" C-m || true
-  fi
   printf '%s\n%s' "tmux" "$session_name"
 }
 
@@ -447,7 +464,6 @@ start_session() {
   local repo="$1"
   local slug="$2"
   local spec_path="$3"
-  local auto_message="${4:-}"
 
   local result
   if result="$(start_session_via_dev "$repo" "$slug" "$spec_path")"; then
@@ -456,30 +472,12 @@ start_session() {
   fi
 
   warn "dev backend unavailable or failed; falling back to tmux"
-  start_session_via_tmux "$repo" "$slug" "$spec_path" "$auto_message"
+  start_session_via_tmux "$repo" "$slug" "$spec_path"
 }
 
-send_auto_trigger() {
-  local session_name="$1"
-  local message="$2"
-
-  if ! command -v tmux >/dev/null 2>&1; then
-    warn "Cannot auto-trigger planning: tmux not installed"
-    return 1
-  fi
-
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    if tmux has-session -t "$session_name" 2>/dev/null; then
-      tmux send-keys -t "$session_name" "$message" C-m || true
-      return 0
-    fi
-    sleep 1
-  done
-
-  warn "Could not auto-trigger planning in session $session_name"
-  return 1
-}
+# Auto-trigger is now queue-based — see queue_message() and compute_queue_file().
+# Messages are written to the pi message queue BEFORE the session starts,
+# so pi picks them up reliably on first poll (~500ms after init).
 
 kill_session() {
   local backend="$1"
@@ -722,21 +720,18 @@ cmd_create() {
   fi
 
   if [ "$alive" -eq 0 ]; then
-    local session_result
-    local auto_message=""
+    # Queue the auto-trigger BEFORE starting the session.
+    # Pi's message-queue extension will pick it up on first poll (~500ms after init).
     if [ "$auto_trigger" -eq 1 ]; then
-      auto_message="$AUTO_TRIGGER_MESSAGE"
+      queue_message "$dir" "$AUTO_TRIGGER_MESSAGE"
+      info "Auto-trigger queued for pi message queue"
     fi
-    session_result="$(start_session "$repo" "$slug" "$dir" "$auto_message")"
+
+    local session_result
+    session_result="$(start_session "$repo" "$slug" "$dir")"
     backend="$(printf '%s' "$session_result" | head -n1)"
     session_name="$(printf '%s' "$session_result" | tail -n1)"
     started_new_session=1
-  fi
-
-  if [ "$auto_trigger" -eq 1 ] && [ "$started_new_session" -eq 1 ] && [ "$backend" = "dev" ]; then
-    if send_auto_trigger "$session_name" "$AUTO_TRIGGER_MESSAGE"; then
-      info "Auto-trigger sent to session: $AUTO_TRIGGER_MESSAGE"
-    fi
   fi
 
   write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "$backend" "$session_name"
@@ -748,13 +743,13 @@ cmd_create() {
   echo "Attach: tmux attach -t $session_name"
   if [ "$auto_trigger" -eq 1 ]; then
     if [ "$started_new_session" -eq 1 ]; then
-      echo "Auto-trigger: attempted \"$AUTO_TRIGGER_MESSAGE\""
+      echo "Auto-trigger: queued via pi message queue"
     else
       echo "Auto-trigger: skipped (session already running)"
     fi
   else
     echo "Auto-trigger: disabled (--no-auto)"
-    echo "Manual trigger: say \"$AUTO_TRIGGER_MESSAGE\" in the planning session"
+    echo "Manual trigger: say \"let's draft this\" in the planning session"
   fi
 }
 
