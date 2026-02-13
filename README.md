@@ -76,6 +76,10 @@ If you already have [cashew](https://github.com/andrewxhill/cashew) installed, `
 ```bash
 git clone git@github.com:craigmmills/acorn.git
 ln -s "$(pwd)/acorn/bin/acorn" /usr/local/bin/acorn
+
+# Register /acorn command with Claude Code
+ln -sf "$(pwd)/acorn/claude/commands/acorn.md" ~/.claude/commands/acorn.md
+
 acorn --help
 ```
 
@@ -92,6 +96,10 @@ ln -s "$(pwd)/acorn/bin/acorn" /usr/local/bin/acorn
 
 # Option B: Add to PATH in your shell profile (~/.zshrc or ~/.bashrc)
 export PATH="$HOME/path/to/acorn/bin:$PATH"
+
+# Register /acorn command with Claude Code
+mkdir -p ~/.claude/commands
+ln -sf "$(pwd)/acorn/claude/commands/acorn.md" ~/.claude/commands/acorn.md
 ```
 
 Then install the pi message-queue extension. Acorn's auto-trigger sends the planning prompt to pi via a file-based message queue. Pi needs this extension to pick up queued messages.
