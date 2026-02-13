@@ -3,7 +3,10 @@ set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_NAME="acorn"
-PROJECTS_DIR="${HOME}/Projects"
+PROJECTS_DIR="$HOME/projects"
+if [ -d "$HOME/Projects" ]; then
+  PROJECTS_DIR="$HOME/Projects"
+fi
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
 PI_PROVIDER="${ACORN_PI_PROVIDER:-anthropic}"
 PI_MODEL="${ACORN_PI_MODEL:-claude-opus-4-6}"
@@ -423,58 +426,23 @@ validate_prompt_md() {
   return 0
 }
 
-start_session_via_dev() {
+start_session() {
   local repo="$1"
   local slug="$2"
-  local repo_main="$3"
-
-  if ! command -v dev >/dev/null 2>&1; then
-    return 1
-  fi
-
-  local display_target="${repo}/specs/${slug}/pi"
-  if dev "$display_target" >/dev/null 2>&1; then
-    local actual
-    actual="$(printf '%s' "$display_target" | tr '/' '_')"
-    printf '%s\n%s' "dev" "$actual"
-    return 0
-  fi
-
-  return 1
-}
-
-start_session_via_tmux() {
-  local repo="$1"
-  local slug="$2"
-  local worktree_path="$3"
+  local spec_path="$3"
   local session_name
   session_name="$(canonical_session_name "$repo" "$slug")"
 
-  command -v tmux >/dev/null 2>&1 || return 1
+  require_cmds tmux
 
   if tmux has-session -t "$session_name" 2>/dev/null; then
     printf '%s\n%s' "tmux" "$session_name"
     return 0
   fi
 
-  tmux new-session -d -s "$session_name" -c "$worktree_path"
+  tmux new-session -d -s "$session_name" -c "$spec_path"
   tmux send-keys -t "$session_name" "pi --provider ${PI_PROVIDER} --model ${PI_MODEL}" C-m || true
   printf '%s\n%s' "tmux" "$session_name"
-}
-
-start_session() {
-  local repo="$1"
-  local slug="$2"
-  local spec_path="$3"
-
-  local result
-  if result="$(start_session_via_dev "$repo" "$slug" "$spec_path")"; then
-    printf '%s' "$result"
-    return 0
-  fi
-
-  warn "dev backend unavailable or failed; falling back to tmux"
-  start_session_via_tmux "$repo" "$slug" "$spec_path"
 }
 
 # Auto-trigger is now queue-based — see queue_message() and compute_queue_file().
@@ -711,13 +679,11 @@ cmd_create() {
 
   comment_issue "$repo_main" "$issue_number" "Spec started locally at: $dir"
 
-  local backend session_name
+  local session_name
   local meta_path="$dir/meta.json"
-  backend=""
   session_name=""
 
   if [ -f "$meta_path" ]; then
-    backend="$(jq -r '.session_backend // ""' "$meta_path" 2>/dev/null || true)"
     session_name="$(jq -r '.session_name // ""' "$meta_path" 2>/dev/null || true)"
   fi
 
@@ -739,18 +705,20 @@ cmd_create() {
 
     local session_result
     session_result="$(start_session "$repo" "$slug" "$dir")"
-    backend="$(printf '%s' "$session_result" | head -n1)"
     session_name="$(printf '%s' "$session_result" | tail -n1)"
     started_new_session=1
   fi
 
-  write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "$backend" "$session_name"
+  write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "tmux" "$session_name"
 
   echo ""
   echo "Created spec: $dir"
   echo "Session: $session_name"
-  echo "Backend: $backend"
   echo "Attach: tmux attach -t $session_name"
+  if command -v dev >/dev/null 2>&1; then
+    echo "Status: dev pi-status $session_name"
+    echo "Queue:  dev queue-status $session_name -m"
+  fi
   if [ "$auto_trigger" -eq 1 ]; then
     if [ "$started_new_session" -eq 1 ]; then
       echo "Auto-trigger: queued via pi message queue"

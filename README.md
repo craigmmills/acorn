@@ -69,6 +69,18 @@ gh auth status   # confirm you're logged in
 
 ## Installation
 
+### With Cashew (recommended)
+
+If you already have [cashew](https://github.com/andrewxhill/cashew) installed, `dev`, `pi`, and the message-queue extension are already in place. Just add acorn:
+
+```bash
+git clone git@github.com:craigmmills/acorn.git
+ln -s "$(pwd)/acorn/bin/acorn" /usr/local/bin/acorn
+acorn --help
+```
+
+### Standalone (without Cashew)
+
 ```bash
 # Clone the repo
 git clone git@github.com:craigmmills/acorn.git
@@ -82,27 +94,30 @@ ln -s "$(pwd)/acorn/bin/acorn" /usr/local/bin/acorn
 export PATH="$HOME/path/to/acorn/bin:$PATH"
 ```
 
-### Install the message-queue extension
-
-Acorn's auto-trigger sends the planning prompt to pi via a file-based message queue. Pi needs the included extension to pick up these messages.
+Then install the pi message-queue extension. Acorn's auto-trigger sends the planning prompt to pi via a file-based message queue. Pi needs this extension to pick up queued messages.
 
 ```bash
-# Copy the extension into pi's global extensions directory
+# Clone cashew for the canonical message-queue extension
+git clone git@github.com:andrewxhill/cashew.git
+
+# Symlink into pi's global extensions directory
 mkdir -p ~/.pi/agent/extensions
-cp acorn/extensions/message-queue.ts ~/.pi/agent/extensions/
+ln -sf "$(pwd)/cashew/pi/extensions/message-queue.ts" ~/.pi/agent/extensions/message-queue.ts
 ```
 
-Pi auto-discovers extensions from `~/.pi/agent/extensions/` on startup — no further configuration needed.
+Pi auto-discovers extensions from `~/.pi/agent/extensions/` on startup.
 
 ### Verify installation
 
 ```bash
 acorn --help
+pi --version
+ls ~/.pi/agent/extensions/message-queue.ts
 ```
 
 ### Provider configuration
 
-By default, acorn launches pi with `--provider anthropic --model claude-opus-4-6`. It also writes a local `.pi/settings.json` into each spec directory so pi uses Claude regardless of how the session is started.
+By default, acorn launches pi with `--provider anthropic --model claude-opus-4-6`. It also writes a local `.pi/settings.json` into each spec directory so pi uses Claude regardless of your default pi settings.
 
 To override the provider or model, set environment variables:
 
@@ -111,9 +126,19 @@ export ACORN_PI_PROVIDER=anthropic       # default
 export ACORN_PI_MODEL=claude-opus-4-6    # default
 ```
 
+### Cashew compatibility
+
+Acorn is designed to work alongside cashew's `dev` session manager:
+
+- **Project layout**: Both use `~/Projects/<repo>/main/` (auto-detects `~/Projects` or `~/projects`)
+- **Sessions**: Acorn creates tmux sessions named `<repo>_specs_<slug>_pi` — these show up in `dev` session listings
+- **Monitoring**: Use `dev pi-status <session>` and `dev queue-status <session>` to check on planning agents
+- **Message queue**: Both use the same queue file format (`~/.pi/queues/<path>.jsonl`) — fully interoperable
+- **No conflicts**: Acorn's `.specs/` directory lives inside `main/` and doesn't interfere with cashew worktrees
+
 ## Project Layout Convention
 
-Acorn expects your projects to live at `~/Projects/<repo>/main/`. This is the directory where `gh` commands run and where `.specs/` directories are created.
+Acorn expects your projects to live at `~/Projects/<repo>/main/` (or `~/projects/<repo>/main/`). This is the directory where `gh` commands run and where `.specs/` directories are created.
 
 ```
 ~/Projects/
@@ -151,11 +176,15 @@ This will:
 7. Start a detached tmux session with a pi agent (configured for Anthropic/Claude)
 8. Automatically queue the trigger message via pi's message queue to start planning
 
-Attach anytime to watch progress:
+Monitor or attach anytime:
 
 ```bash
 # Attach to the session (session name is printed by acorn create)
 tmux attach -t <session-name>
+
+# With cashew's dev: check agent status without attaching
+dev pi-status <session-name>
+dev queue-status <session-name> -m
 ```
 
 To opt out of auto-triggering:
@@ -284,16 +313,16 @@ acorn issue plan <repo> <title> [options] [--no-auto]
 Install the GitHub CLI: `brew install gh` and authenticate with `gh auth login`.
 
 **"Repo path not found: ~/Projects/myapp/main"**
-Acorn expects your repo at `~/Projects/<repo>/main/`. Clone or move your repo there.
+Acorn expects your repo at `~/Projects/<repo>/main/` (or `~/projects/<repo>/main/`). Clone or move your repo there. If using cashew, `dev new <repo> <git-url>` sets this up automatically.
 
 **"Failed to fetch issue #42"**
 Make sure `gh` is authenticated and has access to the repo. Run `gh auth status` and check `gh issue view 42` from within the repo.
 
 **Session doesn't start**
-Ensure tmux is installed. If using the `dev` session manager, it will try that first and fall back to tmux.
+Ensure tmux is installed (`brew install tmux`).
 
 **PROMPT.md already exists**
 `acorn create` is idempotent — it won't overwrite an existing PROMPT.md. To regenerate, clean first: `acorn clean <repo> <slug> --yes` then re-run create.
 
 **Auto-trigger doesn't fire**
-The message-queue extension must be installed in `~/.pi/agent/extensions/`. See [Install the message-queue extension](#install-the-message-queue-extension). You can check queue status inside a pi session with `/queue-status`.
+The message-queue extension must be installed in `~/.pi/agent/extensions/`. If you have cashew installed, this is already set up. Otherwise see [Standalone installation](#standalone-without-cashew). Check queue status inside a pi session with `/queue`.
