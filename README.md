@@ -18,7 +18,7 @@ acorn create <repo> <issue#>
     |-- Fetches issue (title, body, comments)
     |-- Generates PROMPT.md with requirements + planning methodology
     |-- Sets GitHub label: spec-in-progress
-    |-- Starts a detached Claude agent session
+    |-- Starts a detached pi agent session (Anthropic/Claude)
     |
     v
 5-Stage Multi-Agent Planning (20 sub-agents)
@@ -43,7 +43,9 @@ Install these before using Acorn:
 | **gh** | GitHub CLI — fetches issues, manages labels, posts comments | `brew install gh` then `gh auth login` |
 | **jq** | JSON parsing | `brew install jq` |
 | **tmux** | Session management for detached agent sessions | `brew install tmux` |
-| **Claude Code** | The AI agent that runs the planning pipeline | [claude.ai/download](https://claude.ai/download) |
+| **pi** | The AI coding agent that runs the planning pipeline | `npm install -g @mariozechner/pi-coding-agent` |
+
+Pi must be configured with an Anthropic API key. Set `ANTHROPIC_API_KEY` in your environment or authenticate via pi's auth flow.
 
 On Linux, replace `brew install` with your package manager (e.g., `apt install gh jq tmux`).
 
@@ -53,7 +55,7 @@ On Linux, replace `brew install` with your package manager (e.g., `apt install g
 gh --version
 jq --version
 tmux -V
-claude --version   # Claude Code CLI
+pi --version
 ```
 
 ### GitHub authentication
@@ -74,16 +76,39 @@ git clone git@github.com:craigmmills/acorn.git
 # Add to your PATH (pick one)
 
 # Option A: Symlink into a directory already on your PATH
-ln -s "$(pwd)/acorn/main/bin/acorn" /usr/local/bin/acorn
+ln -s "$(pwd)/acorn/bin/acorn" /usr/local/bin/acorn
 
 # Option B: Add to PATH in your shell profile (~/.zshrc or ~/.bashrc)
-export PATH="$HOME/path/to/acorn/main/bin:$PATH"
+export PATH="$HOME/path/to/acorn/bin:$PATH"
 ```
 
-Verify it works:
+### Install the message-queue extension
+
+Acorn's auto-trigger sends the planning prompt to pi via a file-based message queue. Pi needs the included extension to pick up these messages.
+
+```bash
+# Copy the extension into pi's global extensions directory
+mkdir -p ~/.pi/agent/extensions
+cp acorn/extensions/message-queue.ts ~/.pi/agent/extensions/
+```
+
+Pi auto-discovers extensions from `~/.pi/agent/extensions/` on startup — no further configuration needed.
+
+### Verify installation
 
 ```bash
 acorn --help
+```
+
+### Provider configuration
+
+By default, acorn launches pi with `--provider anthropic --model claude-opus-4-6`. It also writes a local `.pi/settings.json` into each spec directory so pi uses Claude regardless of how the session is started.
+
+To override the provider or model, set environment variables:
+
+```bash
+export ACORN_PI_PROVIDER=anthropic       # default
+export ACORN_PI_MODEL=claude-opus-4-6    # default
 ```
 
 ## Project Layout Convention
@@ -98,6 +123,8 @@ Acorn expects your projects to live at `~/Projects/<repo>/main/`. This is the di
         42-add-auth/
           PROMPT.md    <-- generated requirements + planning methodology
           meta.json    <-- metadata (repo, issue, session info)
+          .pi/
+            settings.json  <-- local pi config (provider: anthropic)
           plans/
             draft_plan_1.md ... draft_plan_6.md
             critique_1.md ... critique_6.md
@@ -121,8 +148,8 @@ This will:
 4. Create lifecycle labels on the repo if they don't exist
 5. Set the issue label to `spec-in-progress`
 6. Post a comment on the issue with the spec location
-7. Start a detached tmux session with a Claude agent
-8. Automatically send the trigger message (`let's draft this`) to start planning
+7. Start a detached tmux session with a pi agent (configured for Anthropic/Claude)
+8. Automatically queue the trigger message via pi's message queue to start planning
 
 Attach anytime to watch progress:
 
@@ -267,3 +294,6 @@ Ensure tmux is installed. If using the `dev` session manager, it will try that f
 
 **PROMPT.md already exists**
 `acorn create` is idempotent — it won't overwrite an existing PROMPT.md. To regenerate, clean first: `acorn clean <repo> <slug> --yes` then re-run create.
+
+**Auto-trigger doesn't fire**
+The message-queue extension must be installed in `~/.pi/agent/extensions/`. See [Install the message-queue extension](#install-the-message-queue-extension). You can check queue status inside a pi session with `/queue-status`.

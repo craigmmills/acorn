@@ -5,6 +5,8 @@ IFS=$'\n\t'
 SCRIPT_NAME="acorn"
 PROJECTS_DIR="${HOME}/Projects"
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
+PI_PROVIDER="${ACORN_PI_PROVIDER:-anthropic}"
+PI_MODEL="${ACORN_PI_MODEL:-claude-opus-4-6}"
 AUTO_TRIGGER_MESSAGE="Read PROMPT.md in the current directory. It contains the requirements and the mandatory 5-stage multi-agent planning methodology. Execute the full methodology now — begin with Stage 1 (launch 6 parallel drafting sub-agents)."
 
 info() { printf '[INFO] %s\n' "$*"; }
@@ -456,7 +458,7 @@ start_session_via_tmux() {
   fi
 
   tmux new-session -d -s "$session_name" -c "$worktree_path"
-  tmux send-keys -t "$session_name" "pi" C-m || true
+  tmux send-keys -t "$session_name" "pi --provider ${PI_PROVIDER} --model ${PI_MODEL}" C-m || true
   printf '%s\n%s' "tmux" "$session_name"
 }
 
@@ -681,6 +683,14 @@ cmd_create() {
   dir="$(spec_dir "$repo" "$slug")"
 
   mkdir -p "$dir/plans"
+  mkdir -p "$dir/.pi"
+
+  # Write local pi settings so pi uses Claude regardless of launch method
+  local pi_settings="$dir/.pi/settings.json"
+  if [ ! -f "$pi_settings" ]; then
+    jq -n --arg provider "$PI_PROVIDER" --arg model "$PI_MODEL" \
+      '{provider: $provider, model: $model}' > "$pi_settings"
+  fi
 
   local prompt_path="$dir/PROMPT.md"
   if [ ! -f "$prompt_path" ]; then
