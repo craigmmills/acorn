@@ -6,7 +6,7 @@ Ideas start small. Acorn grows them into something an agent can build.
 
 ## What It Does
 
-Acorn takes a GitHub issue and runs it through a 5-stage multi-agent planning pipeline to produce a detailed implementation specification (`SPEC.md`). The pipeline launches 20 Claude sub-agents across 5 stages — drafting, critiquing, synthesizing, simulating, and finalizing — to produce a spec that's ready to hand to a developer or agent for implementation.
+Acorn takes a GitHub issue and runs it through a 5-stage multi-agent planning pipeline to produce a detailed implementation specification (`SPEC.md`). The pipeline launches 13 Claude sub-agents across 5 stages — reconnaissance, drafting, evaluating, synthesizing, red-teaming, and finalizing — to produce a spec that's ready to hand to a developer or agent for implementation.
 
 **The pipeline:**
 
@@ -18,15 +18,16 @@ acorn create <repo> <issue#>
     |-- Fetches issue (title, body, comments)
     |-- Generates PROMPT.md with requirements + planning methodology
     |-- Sets GitHub label: spec-in-progress
-    |-- Starts a detached pi agent session (Anthropic/Claude)
+    |-- Starts a detached Claude Code session in tmux
     |
     v
-5-Stage Multi-Agent Planning (20 sub-agents)
-    |-- Stage 1: 6 agents draft independent plans
-    |-- Stage 2: 6 agents critique and rewrite drafts
-    |-- Stage 3: 1 agent synthesizes a master plan
-    |-- Stage 4: 6 agents simulate implementing the plan
-    |-- Stage 5: 1 agent produces final SPEC.md
+5-Stage Multi-Agent Planning (13 sub-agents)
+    |-- Stage 0: 3 agents explore the codebase (architecture, relevant code, conventions)
+    |-- Stage 1: 4 agents draft plans with distinct architectural lenses
+    |-- Stage 2: 1 agent scores all drafts against a structured rubric
+    |-- Stage 3: 1 agent synthesizes a master plan using scored drafts
+    |-- Stage 4: 4 agents adversarially red-team the master plan
+    |-- Stage 5: 1 agent produces final SPEC.md with requirements traceability
     |
     v
 acorn approve <repo> <slug>
@@ -43,9 +44,7 @@ Install these before using Acorn:
 | **gh** | GitHub CLI — fetches issues, manages labels, posts comments | `brew install gh` then `gh auth login` |
 | **jq** | JSON parsing | `brew install jq` |
 | **tmux** | Session management for detached agent sessions | `brew install tmux` |
-| **pi** | The AI coding agent that runs the planning pipeline | `npm install -g @mariozechner/pi-coding-agent` |
-
-Pi must be configured with an Anthropic API key. Set `ANTHROPIC_API_KEY` in your environment or authenticate via pi's auth flow.
+| **claude** | Claude Code CLI — runs the planning pipeline | See [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) |
 
 On Linux, replace `brew install` with your package manager (e.g., `apt install gh jq tmux`).
 
@@ -55,7 +54,7 @@ On Linux, replace `brew install` with your package manager (e.g., `apt install g
 gh --version
 jq --version
 tmux -V
-pi --version
+claude --version
 ```
 
 ### GitHub authentication
@@ -71,7 +70,7 @@ gh auth status   # confirm you're logged in
 
 ### With Cashew (recommended)
 
-If you already have [cashew](https://github.com/andrewxhill/cashew) installed, `dev`, `pi`, and the message-queue extension are already in place. Just add acorn:
+If you already have [cashew](https://github.com/andrewxhill/cashew) installed, `dev` is already in place. Just add acorn:
 
 ```bash
 git clone git@github.com:craigmmills/acorn.git
@@ -102,36 +101,11 @@ mkdir -p ~/.claude/commands
 ln -sf "$(pwd)/acorn/claude/commands/acorn.md" ~/.claude/commands/acorn.md
 ```
 
-Then install the pi message-queue extension. Acorn's auto-trigger sends the planning prompt to pi via a file-based message queue. Pi needs this extension to pick up queued messages.
-
-```bash
-# Clone cashew for the canonical message-queue extension
-git clone git@github.com:andrewxhill/cashew.git
-
-# Symlink into pi's global extensions directory
-mkdir -p ~/.pi/agent/extensions
-ln -sf "$(pwd)/cashew/pi/extensions/message-queue.ts" ~/.pi/agent/extensions/message-queue.ts
-```
-
-Pi auto-discovers extensions from `~/.pi/agent/extensions/` on startup.
-
 ### Verify installation
 
 ```bash
 acorn --help
-pi --version
-ls ~/.pi/agent/extensions/message-queue.ts
-```
-
-### Provider configuration
-
-By default, acorn launches pi with `--provider anthropic --model claude-opus-4-6`. It also writes a local `.pi/settings.json` into each spec directory so pi uses Claude regardless of your default pi settings.
-
-To override the provider or model, set environment variables:
-
-```bash
-export ACORN_PI_PROVIDER=anthropic       # default
-export ACORN_PI_MODEL=claude-opus-4-6    # default
+claude --version
 ```
 
 ### Cashew compatibility
@@ -139,9 +113,7 @@ export ACORN_PI_MODEL=claude-opus-4-6    # default
 Acorn is designed to work alongside cashew's `dev` session manager:
 
 - **Project layout**: Both use `~/Projects/<repo>/main/` (auto-detects `~/Projects` or `~/projects`)
-- **Sessions**: Acorn creates tmux sessions named `<repo>_specs_<slug>_pi` — these show up in `dev` session listings
-- **Monitoring**: Use `dev pi-status <session>` and `dev queue-status <session>` to check on planning agents
-- **Message queue**: Both use the same queue file format (`~/.pi/queues/<path>.jsonl`) — fully interoperable
+- **Sessions**: Acorn creates tmux sessions named `<repo>_specs_<slug>_claude` — these show up in `dev` session listings
 - **No conflicts**: Acorn's `.specs/` directory lives inside `main/` and doesn't interfere with cashew worktrees
 
 ## Project Layout Convention
@@ -156,14 +128,22 @@ Acorn expects your projects to live at `~/Projects/<repo>/main/` (or `~/projects
         42-add-auth/
           PROMPT.md    <-- generated requirements + planning methodology
           meta.json    <-- metadata (repo, issue, session info)
-          .pi/
-            settings.json  <-- local pi config (provider: anthropic)
+          recon/
+            architecture.md    <-- Stage 0: project structure & tech stack
+            relevant_code.md   <-- Stage 0: files & APIs relevant to the feature
+            conventions.md     <-- Stage 0: coding patterns & constraints
           plans/
-            draft_plan_1.md ... draft_plan_6.md
-            critique_1.md ... critique_6.md
-            master_plan_draft.md
-            simulation_1.md ... simulation_6.md
-            SPEC.md    <-- final implementation spec
+            draft_plan_1.md    <-- Stage 1: Minimal Surgery lens
+            draft_plan_2.md    <-- Stage 1: Clean Architecture lens
+            draft_plan_3.md    <-- Stage 1: Robustness-First lens
+            draft_plan_4.md    <-- Stage 1: Developer Experience lens
+            evaluation.md      <-- Stage 2: rubric scores for all drafts
+            master_plan.md     <-- Stage 3: synthesized master plan
+            red_team_1.md      <-- Stage 4: Requirements Auditor
+            red_team_2.md      <-- Stage 4: Ambiguity Hunter
+            red_team_3.md      <-- Stage 4: Codebase Validator
+            red_team_4.md      <-- Stage 4: Contradiction & Edge Case Finder
+            SPEC.md            <-- Stage 5: final implementation spec
 ```
 
 ## Usage
@@ -181,18 +161,14 @@ This will:
 4. Create lifecycle labels on the repo if they don't exist
 5. Set the issue label to `spec-in-progress`
 6. Post a comment on the issue with the spec location
-7. Start a detached tmux session with a pi agent (configured for Anthropic/Claude)
-8. Automatically queue the trigger message via pi's message queue to start planning
+7. Start a detached tmux session with Claude Code
+8. Automatically trigger the planning pipeline after ~5 seconds
 
 Monitor or attach anytime:
 
 ```bash
 # Attach to the session (session name is printed by acorn create)
 tmux attach -t <session-name>
-
-# With cashew's dev: check agent status without attaching
-dev pi-status <session-name>
-dev queue-status <session-name> -m
 ```
 
 To opt out of auto-triggering:
@@ -281,17 +257,18 @@ Acorn manages these labels automatically (creates them if they don't exist):
 
 ## How the Planning Pipeline Works
 
-The `PROMPT.md` generated by Acorn contains embedded instructions for a 5-stage multi-agent planning methodology. When a Claude agent reads it and you say "let's draft this", it orchestrates:
+The `PROMPT.md` generated by Acorn contains embedded instructions for a 5-stage multi-agent planning methodology. When Claude Code reads it and you say "let's draft this", it orchestrates:
 
-1. **Stage 1 — Parallel Drafting**: 6 sub-agents each independently draft a complete implementation plan
-2. **Stage 2 — Parallel Critique**: 6 sub-agents each critique and rewrite one of the drafts
-3. **Stage 3 — Synthesis**: 1 sub-agent reads all 12 artifacts and synthesizes a master plan, resolving conflicts and picking the best approaches
-4. **Stage 4 — Parallel Simulation**: 6 sub-agents each dry-run the master plan, finding gaps, edge cases, and issues
-5. **Stage 5 — Final Spec**: 1 sub-agent incorporates all simulation findings into the final `plans/SPEC.md`
+0. **Stage 0 — Codebase Reconnaissance**: 3 sub-agents explore the actual codebase from different angles (architecture, relevant code, conventions) to ground all subsequent work in reality
+1. **Stage 1 — Diverse Parallel Drafting**: 4 sub-agents each independently draft a complete implementation plan, each with a distinct architectural lens (Minimal Surgery, Clean Architecture, Robustness-First, Developer Experience)
+2. **Stage 2 — Rubric-Based Evaluation**: 1 sub-agent scores all 4 drafts against a structured rubric (requirements coverage, implementability, codebase consistency, completeness, feasibility, risk identification)
+3. **Stage 3 — Weighted Synthesis**: 1 sub-agent reads all drafts plus the evaluation scores and synthesizes a master plan, using scores to guide trade-offs
+4. **Stage 4 — Adversarial Red Team**: 4 sub-agents each attack the master plan from a different angle (requirements auditing, ambiguity hunting, codebase validation, contradiction/edge case finding)
+5. **Stage 5 — Final Spec**: 1 sub-agent incorporates all red team findings into the final `plans/SPEC.md` with a requirements traceability matrix and red team resolution log
 
-**Total: 20 sub-agent launches. No shortcuts.**
+**Total: 13 sub-agent launches. No shortcuts.**
 
-The orchestrator agent's only job is to launch sub-agents and confirm completion — it never writes plan content itself. This keeps its context window clean while leveraging 20 independent 200k-token contexts for thorough analysis.
+The orchestrator agent's only job is to launch sub-agents and confirm completion — it never writes plan content itself. This keeps its context window clean while leveraging 13 independent 200k-token contexts for thorough analysis.
 
 ## Command Reference
 
@@ -317,6 +294,9 @@ acorn issue plan <repo> <title> [options] [--no-auto]
 
 ## Troubleshooting
 
+**"Missing required command(s): claude"**
+Install Claude Code. See [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code).
+
 **"Missing required command(s): gh"**
 Install the GitHub CLI: `brew install gh` and authenticate with `gh auth login`.
 
@@ -333,4 +313,4 @@ Ensure tmux is installed (`brew install tmux`).
 `acorn create` is idempotent — it won't overwrite an existing PROMPT.md. To regenerate, clean first: `acorn clean <repo> <slug> --yes` then re-run create.
 
 **Auto-trigger doesn't fire**
-The message-queue extension must be installed in `~/.pi/agent/extensions/`. If you have cashew installed, this is already set up. Otherwise see [Standalone installation](#standalone-without-cashew). Check queue status inside a pi session with `/queue`.
+The auto-trigger sends the planning prompt to Claude Code via tmux after a ~5 second delay. If Claude Code hasn't finished initializing, attach to the session and send the trigger manually: say "let's draft this".

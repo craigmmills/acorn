@@ -8,9 +8,7 @@ if [ -d "$HOME/Projects" ]; then
   PROJECTS_DIR="$HOME/Projects"
 fi
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
-PI_PROVIDER="${ACORN_PI_PROVIDER:-anthropic}"
-PI_MODEL="${ACORN_PI_MODEL:-claude-opus-4-6}"
-AUTO_TRIGGER_MESSAGE="Read PROMPT.md in the current directory. It contains the requirements and the mandatory 5-stage multi-agent planning methodology. Execute the full methodology now — begin with Stage 1 (launch 6 parallel drafting sub-agents)."
+AUTO_TRIGGER_MESSAGE="Read PROMPT.md in the current directory. It contains the requirements and the mandatory 5-stage multi-agent planning methodology. Execute the full methodology now - begin with Stage 0 (launch 3 parallel codebase reconnaissance sub-agents)."
 
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*" >&2; }
@@ -95,7 +93,7 @@ build_slug() {
 canonical_session_name() {
   local repo="$1"
   local slug="$2"
-  local session="${repo}/specs/${slug}/pi"
+  local session="${repo}/specs/${slug}/claude"
   session="$(printf '%s' "$session" | sed -E 's#[[:space:]/]+#_#g; s/[^A-Za-z0-9_.-]/-/g; s/_+/_/g; s/-+/-/g')"
   printf '%s' "$session"
 }
@@ -103,28 +101,6 @@ canonical_session_name() {
 issue_number_from_slug() {
   local slug="$1"
   printf '%s' "$slug" | sed -nE 's/^([0-9]+)-.*/\1/p'
-}
-
-# Compute pi message queue file path for a given working directory.
-# Mirrors ~/.pi/agent/extensions/message-queue.ts:getQueueFile()
-compute_queue_file() {
-  local cwd_path="$1"
-  local safe_path
-  safe_path="$(printf '%s' "$cwd_path" | tr '[:upper:]' '[:lower:]' | tr '/' '-' | sed 's/^-//')"
-  printf '%s/.pi/queues/%s.jsonl' "$HOME" "$safe_path"
-}
-
-# Write a message to the pi message queue for a given working directory.
-# Pi polls this file every 500ms after session_start and delivers via sendUserMessage.
-queue_message() {
-  local cwd_path="$1"
-  local message="$2"
-  local mode="${3:-followUp}"
-  local queue_file
-  queue_file="$(compute_queue_file "$cwd_path")"
-  mkdir -p "$(dirname "$queue_file")"
-  jq -n --arg msg "$message" --arg mode "$mode" \
-    '{message: $msg, mode: $mode}' >> "$queue_file"
 }
 
 gh_issue_json() {
@@ -193,7 +169,7 @@ comment_issue() {
 }
 
 planning_block() {
-  cat <<'EOF'
+  cat <<'METHODOLOGY_EOF'
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS
 
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
@@ -202,7 +178,6 @@ planning_block() {
 > you MUST execute the 5-stage multi-agent pipeline described below.
 >
 > **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
-> **DO NOT say "I'll draft a plan" — you MUST say "I'll launch 6 parallel sub-agents to draft plans."**
 >
 > If you write ANY plan content yourself instead of delegating to sub-agents via the Task tool,
 > you have FAILED. Your ONLY job is to launch Task agents and wait for them to finish.
@@ -222,84 +197,251 @@ planning_block() {
 You MUST execute these 5 stages in order. Each stage MUST use the Task tool to launch sub-agents.
 You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the work yourself.
 
-1. **Stage 1**: YOU launch 6 parallel Task agents → each drafts an independent plan
-2. **Stage 2**: YOU launch 6 parallel Task agents → each critiques and rewrites a draft
-3. **Stage 3**: YOU launch 1 Task agent → synthesizes all drafts + critiques into master plan
-4. **Stage 4**: YOU launch 6 parallel Task agents → each simulates implementing the master plan
-5. **Stage 5**: YOU launch 1 Task agent → produces final plan from simulation findings
+0. **Stage 0**: YOU launch 3 parallel Task agents → each explores the codebase from a different angle
+1. **Stage 1**: YOU launch 4 parallel Task agents → each drafts an independent plan with a distinct architectural lens
+2. **Stage 2**: YOU launch 1 Task agent → scores all 4 drafts against a structured rubric
+3. **Stage 3**: YOU launch 1 Task agent → synthesizes a master plan using scored drafts
+4. **Stage 4**: YOU launch 4 parallel Task agents → each adversarially red-teams the master plan
+5. **Stage 5**: YOU launch 1 Task agent → produces final SPEC.md with traceability
 
-Total: 20 Task agent launches across 5 stages. No shortcuts.
-
----
-
-### Stage 1: Initial Parallel Drafting
-
-YOU MUST launch 6 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
-Each sub-agent gets assigned a number N (1 through 6).
-
-**Prompt for each sub-agent (replace N with 1-6):**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are sub-agent N. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory for full requirements and context.
-- Write a detailed, complete implementation plan to plans/draft_plan_N.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append more content.
-- NEVER write more than 4000 tokens in a single tool call — you will hit output limits and lose work.
-- Cover: architecture, file changes, data models, API design, error handling, testing strategy, migration plan.
-- Be specific — reference actual file paths, function names, and code patterns from the codebase.
-- Your final response to the orchestrator must be ONLY these exact words: "Done. Output: plans/draft_plan_N.md"
-- Do NOT return any content, summaries, analysis, or explanations. ONLY the done message.
-```
-
-**After all 6 complete:** Confirm all 6 files exist, then proceed to Stage 2. Do NOT read the files.
+Total: 13 Task agent launches across 5 stages (Stage 0 through Stage 5). No shortcuts.
 
 ---
 
-### Stage 2: Parallel Critique & Rewrite
+### Stage 0: Codebase Reconnaissance
 
-YOU MUST launch 6 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
-Each sub-agent gets assigned the same number N as their draft.
+YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
 
-**Prompt for each sub-agent (replace N with 1-6):**
+**Each agent explores the actual codebase to ground all subsequent work in reality.**
+
+**Agent A — Architecture & Structure:**
 
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are sub-agent N. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read plans/draft_plan_N.md — this is the draft you must critique.
-- Write a thorough critique AND an improved version of the plan to plans/critique_N.md
-- Critique for: correctness, robustness, missed requirements, poor decisions, missing error handling, gaps in testing, wrong assumptions about the codebase.
-- Check completeness against every requirement in PROMPT.md.
+- You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to understand:
+  - Directory layout and project structure
+  - Tech stack, frameworks, and languages used
+  - Build system and deployment model
+  - Key entry points and main modules
+  - Database schemas and data layer architecture
+- Write your findings to recon/architecture.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/critique_N.md"
+- Focus on FACTS about the codebase, not opinions. Reference specific file paths.
+- Your final response must be ONLY: "Done. Output: recon/architecture.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
-**After all 6 complete:** Confirm all 6 files exist, then proceed to Stage 3. Do NOT read the files.
+**Agent B — Relevant Code:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to identify:
+  - Files and modules most likely to be modified for this feature
+  - Existing APIs, endpoints, and interfaces relevant to the feature
+  - Data models, types, and schemas that would be affected
+  - Integration points with external services or systems
+  - Related existing functionality that the feature would interact with
+- Write your findings to recon/relevant_code.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
+- Your final response must be ONLY: "Done. Output: recon/relevant_code.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Agent C — Conventions & Constraints:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to document:
+  - Coding style and naming conventions used throughout
+  - Error handling patterns (how errors are thrown, caught, reported)
+  - Test framework, test file naming, test patterns and helpers
+  - CI/CD configuration and quality gates
+  - Dependency management approach
+  - Existing abstractions and utilities that should be reused
+  - Any CLAUDE.md, AGENTS.md, or contributing guidelines
+- Write your findings to recon/conventions.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Include concrete examples from the codebase. Reference specific file paths.
+- Your final response must be ONLY: "Done. Output: recon/conventions.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After all 3 complete:** Confirm all 3 files exist (recon/architecture.md, recon/relevant_code.md, recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
 
 ---
 
-### Stage 3: Master Plan Synthesis
+### Stage 1: Diverse Parallel Drafting
+
+YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
+Each sub-agent gets a distinct architectural lens that forces genuinely different approaches.
+
+**Drafter A — Minimal Surgery lens:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Minimal Surgery drafter. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- YOUR LENS: Achieve the requirements with the SMALLEST possible change set. Touch the fewest files. Reuse everything that exists. Avoid new abstractions. Prefer modifying existing code over creating new files.
+- Write a detailed, complete implementation plan to plans/draft_plan_1.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
+- Be specific — reference actual file paths, function names, and code patterns from the recon documents.
+- Your final response must be ONLY: "Done. Output: plans/draft_plan_1.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Drafter B — Clean Architecture lens:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Clean Architecture drafter. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- YOUR LENS: Design the RIGHT abstraction. Proper separation of concerns, clear interfaces, extensibility. Accept more files changed if the architecture is better. Think about how this feature fits into the broader system.
+- Write a detailed, complete implementation plan to plans/draft_plan_2.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
+- Be specific — reference actual file paths, function names, and code patterns from the recon documents.
+- Your final response must be ONLY: "Done. Output: plans/draft_plan_2.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Drafter C — Robustness-First lens:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Robustness-First drafter. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- YOUR LENS: Start from FAILURE MODES. What can go wrong? Design error handling, validation, and edge cases FIRST. Testing strategy drives the architecture. Every path must have explicit error handling. Consider rollback and recovery.
+- Write a detailed, complete implementation plan to plans/draft_plan_3.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
+- Be specific — reference actual file paths, function names, and code patterns from the recon documents.
+- Your final response must be ONLY: "Done. Output: plans/draft_plan_3.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Drafter D — Developer Experience lens:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Developer Experience drafter. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- YOUR LENS: Optimize for the NEXT DEVELOPER who reads this code. Simplicity over cleverness. Clear naming. Obvious control flow. Minimal cognitive load. If a junior developer would struggle to understand it, simplify it.
+- Write a detailed, complete implementation plan to plans/draft_plan_4.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
+- Be specific — reference actual file paths, function names, and code patterns from the recon documents.
+- Your final response must be ONLY: "Done. Output: plans/draft_plan_4.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After all 4 complete:** Confirm all 4 files exist, then proceed to Stage 2. Do NOT read the files.
+
+---
+
+### Stage 2: Rubric-Based Evaluation
 
 YOU MUST launch 1 Task tool call. Use model "opus".
+
+**This replaces free-form critique with structured scoring. One evaluator scores all 4 drafts comparatively.**
 
 **Prompt:**
 
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are a SUB-AGENT, not the orchestrator.
+- You are the Rubric Evaluator. You are a SUB-AGENT, not the orchestrator.
 - Read PROMPT.md for the full requirements.
-- Read ALL of these files: plans/draft_plan_1.md through plans/draft_plan_6.md AND plans/critique_1.md through plans/critique_6.md (12 files total).
-- Synthesize a master implementation plan that:
-  - Identifies where drafts AGREE (high confidence decisions)
-  - Identifies where drafts DISAGREE (needs resolution — pick the best approach and explain why)
-  - Incorporates critique findings and improvements
-  - Addresses risks and open questions raised across all drafts
-  - Resolves conflicts explicitly with reasoning
-- Write the master plan to plans/master_plan_draft.md
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read ALL of: plans/draft_plan_1.md through plans/draft_plan_4.md (4 drafts total).
+
+Score EACH draft against this rubric (1-5 scale for each dimension):
+
+**Requirements Coverage (1-5):**
+  5 = Every requirement from the issue maps to a specific section with testable acceptance criteria
+  3 = Most requirements addressed but some are vague or missing acceptance criteria
+  1 = Multiple requirements missing or only superficially addressed
+
+**Implementability (1-5):**
+  5 = A developer could follow this with zero questions — exact file paths, function signatures, step-by-step order
+  3 = Generally clear but some steps require interpretation or assumption
+  1 = Vague hand-waving, missing specifics, ambiguous instructions
+
+**Codebase Consistency (1-5):**
+  5 = Follows all conventions from recon, builds on existing abstractions, respects patterns
+  3 = Mostly consistent but ignores some existing patterns or reinvents existing utilities
+  1 = Ignores existing code, introduces conflicting patterns, doesn't match the codebase style
+
+**Completeness (1-5):**
+  5 = Error handling, testing strategy, migration plan, and rollback all addressed
+  3 = Happy path well-covered but error handling or testing partially addressed
+  1 = Only covers the happy path, no error handling or testing strategy
+
+**Feasibility (1-5):**
+  5 = Every step is concrete and verified against the actual codebase from recon
+  3 = Generally feasible but some assumptions may not hold
+  1 = Contains assumptions contradicted by the recon documents
+
+**Risk Identification (1-5):**
+  5 = Risks identified with specific mitigations and fallback plans
+  3 = Some risks noted but mitigations are vague
+  1 = No risk acknowledgement
+
+Your output MUST include:
+- A score table: each draft scored on each dimension with a brief justification per score
+- A comparative ranking: which draft is strongest overall and on which dimensions
+- Strengths to preserve: the best ideas from each draft that the synthesizer should adopt
+- Weaknesses to avoid: specific flaws from each draft that the synthesizer must not repeat
+- Gap analysis: requirements or concerns not adequately addressed by ANY draft
+
+- Write your evaluation to plans/evaluation.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/master_plan_draft.md"
+- Your final response must be ONLY: "Done. Output: plans/evaluation.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After completion:** Confirm the file exists, then proceed to Stage 3. Do NOT read the file.
+
+---
+
+### Stage 3: Weighted Synthesis
+
+YOU MUST launch 1 Task tool call. Use model "opus".
+
+**The synthesizer receives pre-scored drafts so it can make informed trade-offs.**
+
+**Prompt:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Synthesis agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read ALL of: plans/draft_plan_1.md through plans/draft_plan_4.md (4 drafts).
+- Read plans/evaluation.md (the rubric scores and comparative analysis).
+
+Synthesize a master implementation plan using the evaluation to guide decisions:
+  - For dimensions where one draft clearly leads in score: adopt that draft's approach for those aspects
+  - Where all drafts agree: adopt directly as high-confidence decisions
+  - Where drafts disagree: use evaluation scores + codebase recon to resolve, explain the choice
+  - Incorporate every strength flagged by the evaluator
+  - Avoid every weakness flagged by the evaluator
+  - Address every gap identified in the gap analysis
+  - The resulting plan must score 4+ on every rubric dimension
+
+- Write the master plan to plans/master_plan.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/master_plan.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -307,34 +449,115 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 
 ---
 
-### Stage 4: Parallel Implementation Simulation
+### Stage 4: Adversarial Red Team
 
-YOU MUST launch 6 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
+YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
 
-**Prompt for each sub-agent (replace N with 1-6):**
+**These are ADVERSARIAL agents. Their job is to BREAK the spec, not cooperate with it.**
+
+**Red Team A — Requirements Auditor:**
 
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are sub-agent N. You are a SUB-AGENT, not the orchestrator.
+- You are the Requirements Auditor. You are a SUB-AGENT, not the orchestrator.
 - Read PROMPT.md for the full requirements.
-- Read plans/master_plan_draft.md — this is the master plan you must simulate implementing.
-- Perform a detailed DRY RUN of implementing this entire plan:
-  - Walk through each step as if you were actually writing the code
-  - Identify what works well and what would break
-  - Find missing pieces, unstated assumptions, ordering issues
-  - Document gotchas, edge cases, and things the plan doesn't account for
-  - Note any steps that are ambiguous or underspecified
-- Write your simulation findings to plans/simulation_N.md
+- Read plans/master_plan.md — this is the plan you must audit.
+
+YOUR MISSION: Systematically verify every requirement from the original issue.
+For EACH requirement in PROMPT.md:
+  - Is it addressed in the master plan? WHERE exactly (quote the relevant section)?
+  - Is the acceptance criteria testable and specific?
+  - Could a developer implement it differently than intended due to ambiguity?
+  - What's missing?
+
+Produce a REQUIREMENTS COVERAGE MATRIX as a table:
+| Requirement | Addressed? | Location in Plan | Testable? | Gaps/Ambiguities |
+
+- Write your audit to plans/red_team_1.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/simulation_N.md"
+- Your final response must be ONLY: "Done. Output: plans/red_team_1.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
-**After all 6 complete:** Confirm all 6 files exist, then proceed to Stage 5. Do NOT read the files.
+**Red Team B — Ambiguity Hunter:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Ambiguity Hunter. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read plans/master_plan.md — this is the plan you must attack.
+
+YOUR MISSION: Try to implement each section of this spec and find where you would get STUCK.
+For each major section of the plan:
+  - What information is missing that a developer would need?
+  - What has multiple valid interpretations?
+  - Where would two developers implement it differently?
+  - What requires implicit knowledge not stated in the spec?
+  - What order-of-operations dependencies are unstated?
+
+Be adversarial. Assume the worst interpretation. Find every ambiguity.
+
+- Write your findings to plans/red_team_2.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/red_team_2.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Red Team C — Codebase Validator:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Codebase Validator. You are a SUB-AGENT, not the orchestrator.
+- Read plans/master_plan.md — this is the plan you must validate.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+
+YOUR MISSION: Read the ACTUAL CODEBASE and verify every factual claim in the master plan.
+Use Glob, Grep, and Read tools to check:
+  - Do referenced files and directories actually exist?
+  - Are function signatures and API contracts correct?
+  - Do data models and schemas match what's described?
+  - Are import paths and module references valid?
+  - Does the plan correctly describe existing behavior it claims to modify?
+  - Are there existing utilities or helpers the plan reinvents instead of reusing?
+
+For every factual error, document: what the plan claims vs what the codebase actually shows.
+
+- Write your validation report to plans/red_team_3.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/red_team_3.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Red Team D — Contradiction & Edge Case Finder:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Contradiction & Edge Case Finder. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read plans/master_plan.md — this is the plan you must attack.
+
+YOUR MISSION: Find internal contradictions, edge cases, and failure modes.
+  - Find sections of the plan that CONTRADICT each other
+  - Find ordering dependencies that would BREAK if steps are done out of order
+  - Find edge cases NOT handled (empty inputs, concurrent access, partial failures, large data, etc.)
+  - Find error paths NOT covered (network failures, auth failures, invalid data, timeouts)
+  - Find assumptions that would FAIL in production (race conditions, resource limits, permissions)
+  - Find security concerns (injection, auth bypass, data exposure, privilege escalation)
+
+Be adversarial. Think like a chaos engineer. What breaks under stress?
+
+- Write your findings to plans/red_team_4.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/red_team_4.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After all 4 complete:** Confirm all 4 files exist, then proceed to Stage 5. Do NOT read the files.
 
 ---
 
-### Stage 5: Final Master Plan
+### Stage 5: Final Spec with Traceability
 
 YOU MUST launch 1 Task tool call. Use model "opus".
 
@@ -342,17 +565,39 @@ YOU MUST launch 1 Task tool call. Use model "opus".
 
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are a SUB-AGENT, not the orchestrator.
+- You are the Final Spec agent. You are a SUB-AGENT, not the orchestrator.
 - Read PROMPT.md for the full requirements.
-- Read plans/master_plan_draft.md (the master plan).
-- Read ALL of: plans/simulation_1.md through plans/simulation_6.md (6 simulation files).
-- Produce the FINAL, COMPLETE implementation plan that:
-  - Incorporates all simulation findings
-  - Fixes every issue identified during simulation
-  - Fills in every gap and ambiguity
-  - Is ready to be handed to a developer for implementation with zero questions
-  - Includes specific file paths, function signatures, data models, and step-by-step instructions
-- Write the final plan to plans/SPEC.md
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read plans/master_plan.md (the master plan).
+- Read ALL of: plans/red_team_1.md through plans/red_team_4.md (4 red team reports).
+
+Produce the FINAL, COMPLETE implementation specification. It MUST include:
+
+1. **Requirements Traceability Matrix**: For each requirement from the original issue, the exact
+   section of this spec that addresses it. Any requirement NOT addressed must be flagged as a gap
+   with explicit justification for why it was deferred.
+
+2. **Red Team Resolution Log**: For each finding from the 4 red team reports, document:
+   - The finding (one-line summary)
+   - Resolution: how it was fixed in this spec, OR why it was deferred (with justification)
+   - Deferred items must include severity and recommended follow-up
+
+3. **Implementation Plan**: Step-by-step instructions with:
+   - Specific file paths and function signatures
+   - Data models and schema changes
+   - Implementation order with dependencies between steps
+   - Each step must be independently verifiable
+
+4. **Testing Strategy**: Grounded in the actual test framework and patterns found in recon.
+   - Unit tests, integration tests, and edge case tests
+   - Specific test file locations and naming conventions
+   - Test data and fixture requirements
+
+5. **Risk Register**: Unresolved risks with severity, likelihood, and mitigation strategies.
+
+The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
+
+- Write the final spec to plans/SPEC.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Your final response must be ONLY: "Done. Output: plans/SPEC.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
@@ -370,9 +615,9 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 - You need ~1k tokens per stage. If your context grows beyond ~20k tokens, you broke a rule.
 - NEVER read sub-agent output files yourself (the ONLY exception: plans/SPEC.md at the very end)
 - NEVER consume sub-agent return messages beyond confirming the word "Done"
-- NEVER write plan content yourself — that's what the 20 sub-agents are for
+- NEVER write plan content yourself — that's what the 13 sub-agents are for
 - If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
-EOF
+METHODOLOGY_EOF
 }
 
 render_comments_block() {
@@ -430,10 +675,11 @@ start_session() {
   local repo="$1"
   local slug="$2"
   local spec_path="$3"
+  local auto_trigger="${4:-0}"
   local session_name
   session_name="$(canonical_session_name "$repo" "$slug")"
 
-  require_cmds tmux
+  require_cmds tmux claude
 
   if tmux has-session -t "$session_name" 2>/dev/null; then
     printf '%s\n%s' "tmux" "$session_name"
@@ -441,13 +687,22 @@ start_session() {
   fi
 
   tmux new-session -d -s "$session_name" -c "$spec_path"
-  tmux send-keys -t "$session_name" "pi --provider ${PI_PROVIDER} --model ${PI_MODEL}" C-m || true
+  if [ "$auto_trigger" -eq 1 ]; then
+    tmux send-keys -t "$session_name" "claude --dangerously-skip-permissions" C-m || true
+  else
+    tmux send-keys -t "$session_name" "claude" C-m || true
+  fi
   printf '%s\n%s' "tmux" "$session_name"
 }
 
-# Auto-trigger is now queue-based — see queue_message() and compute_queue_file().
-# Messages are written to the pi message queue BEFORE the session starts,
-# so pi picks them up reliably on first poll (~500ms after init).
+# Send auto-trigger message to a claude session after a delay.
+# Claude Code needs a few seconds to initialize before accepting input.
+send_auto_trigger() {
+  local session_name="$1"
+  local message="$2"
+  (sleep 5 && tmux send-keys -t "$session_name" -l "$message" && tmux send-keys -t "$session_name" Enter) &
+  disown
+}
 
 kill_session() {
   local backend="$1"
@@ -464,7 +719,7 @@ kill_session() {
 
   if command -v tmux >/dev/null 2>&1; then
     local candidates
-    candidates="$(tmux list-sessions -F '#S' 2>/dev/null | grep -E "(acorn:${repo}:${slug}|${repo}_specs_${slug}_pi)" || true)"
+    candidates="$(tmux list-sessions -F '#S' 2>/dev/null | grep -E "(acorn:${repo}:${slug}|${repo}_specs_${slug}_(claude|pi))" || true)"
     if [ -n "$candidates" ]; then
       while IFS= read -r s; do
         [ -n "$s" ] || continue
@@ -635,7 +890,7 @@ cmd_create() {
     shift
   done
 
-  require_cmds gh jq tmux
+  require_cmds gh jq tmux claude
   local repo_main
   repo_main="$(safe_repo_main "$repo")"
 
@@ -651,14 +906,7 @@ cmd_create() {
   dir="$(spec_dir "$repo" "$slug")"
 
   mkdir -p "$dir/plans"
-  mkdir -p "$dir/.pi"
-
-  # Write local pi settings so pi uses Claude regardless of launch method
-  local pi_settings="$dir/.pi/settings.json"
-  if [ ! -f "$pi_settings" ]; then
-    jq -n --arg provider "$PI_PROVIDER" --arg model "$PI_MODEL" \
-      '{provider: $provider, model: $model}' > "$pi_settings"
-  fi
+  mkdir -p "$dir/recon"
 
   local prompt_path="$dir/PROMPT.md"
   if [ ! -f "$prompt_path" ]; then
@@ -696,17 +944,15 @@ cmd_create() {
   fi
 
   if [ "$alive" -eq 0 ]; then
-    # Queue the auto-trigger BEFORE starting the session.
-    # Pi's message-queue extension will pick it up on first poll (~500ms after init).
-    if [ "$auto_trigger" -eq 1 ]; then
-      queue_message "$dir" "$AUTO_TRIGGER_MESSAGE"
-      info "Auto-trigger queued for pi message queue"
-    fi
-
     local session_result
-    session_result="$(start_session "$repo" "$slug" "$dir")"
+    session_result="$(start_session "$repo" "$slug" "$dir" "$auto_trigger")"
     session_name="$(printf '%s' "$session_result" | tail -n1)"
     started_new_session=1
+
+    if [ "$auto_trigger" -eq 1 ]; then
+      send_auto_trigger "$session_name" "$AUTO_TRIGGER_MESSAGE"
+      info "Auto-trigger queued (will send in ~5 seconds)"
+    fi
   fi
 
   write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "tmux" "$session_name"
@@ -715,13 +961,9 @@ cmd_create() {
   echo "Created spec: $dir"
   echo "Session: $session_name"
   echo "Attach: tmux attach -t $session_name"
-  if command -v dev >/dev/null 2>&1; then
-    echo "Status: dev pi-status $session_name"
-    echo "Queue:  dev queue-status $session_name -m"
-  fi
   if [ "$auto_trigger" -eq 1 ]; then
     if [ "$started_new_session" -eq 1 ]; then
-      echo "Auto-trigger: queued via pi message queue"
+      echo "Auto-trigger: will send to claude in ~5 seconds"
     else
       echo "Auto-trigger: skipped (session already running)"
     fi
