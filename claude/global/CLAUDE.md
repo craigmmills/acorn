@@ -1,31 +1,37 @@
 ## Acorn — Issue-to-Spec Pipeline
 
-Acorn turns GitHub issues into agent-ready implementation specs via a 5-stage, 13-agent planning pipeline.
+Acorn turns GitHub issues into agent-ready implementation specs via a multi-agent planning pipeline with 3 speed modes.
 
 **When to use:** Whenever you need to plan a feature, break down an issue, or generate an implementation spec before coding.
 
+**Pipeline modes:**
+| Mode | Flag | Stages | Agents | Best For |
+|------|------|--------|--------|----------|
+| Full | _(default)_ | 6 | 14 | Complex features, architectural decisions |
+| Lite | `--lite` | 4 | 6 | Standard features, moderate complexity |
+| Quick | `--quick` | 2 | 4 | Simple features, time-sensitive changes |
+
 **Common commands:**
 ```bash
-acorn create <repo> <issue#>           # Fetch issue, generate PROMPT.md, start planning session
-acorn create <repo> <issue#> --no-auto # Same but don't auto-trigger planning
-acorn list                              # List all specs across all repos
-acorn list <repo>                       # List specs for a specific repo
-acorn approve <repo> <slug>            # Mark spec as approved for implementation
-acorn clean <repo> <slug> [--yes]      # Kill session + delete spec directory
+acorn create <repo> <issue#>              # Full pipeline (default)
+acorn create <repo> <issue#> --lite       # Lite pipeline (4 stages, 6 agents)
+acorn create <repo> <issue#> --quick      # Quick pipeline (2 stages, 4 agents)
+acorn create <repo> <issue#> --no-auto    # Don't auto-trigger planning
+acorn list                                 # List all specs across all repos
+acorn list <repo>                          # List specs for a specific repo
+acorn approve <repo> <slug>               # Mark spec as approved for implementation
+acorn clean <repo> <slug> [--yes]         # Kill session + delete spec directory
 acorn issue create <repo> <title> [--body <text>] [--label <name>]... [--assignee <login>]...
-acorn issue plan <repo> <title> [options]  # Create issue + immediately start spec generation
+acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + immediately start spec generation
 ```
 
 **How it works:**
-1. `acorn create` fetches the GitHub issue, generates a `PROMPT.md` with requirements + planning methodology
+1. `acorn create` fetches the GitHub issue, generates a `PROMPT.md` with requirements + mode-specific planning methodology
 2. A detached Claude Code session launches in tmux and auto-triggers planning
-3. The orchestrator agent runs 5 stages:
-   - Stage 0: 3 parallel codebase recon agents (architecture, relevant code, conventions)
-   - Stage 1: 4 parallel drafts with distinct lenses (Minimal Surgery, Clean Architecture, Robustness-First, Developer Experience)
-   - Stage 2: 1 rubric-based evaluator scores all drafts
-   - Stage 3: 1 synthesizer creates master plan using scored drafts
-   - Stage 4: 4 parallel adversarial red team agents (requirements audit, ambiguity hunting, codebase validation, contradiction/edge case finding)
-   - Stage 5: 1 final spec with requirements traceability matrix
+3. The orchestrator agent runs the pipeline (mode-dependent):
+   - **Full**: 3 recon → 4 drafts → 1 evaluation → 1 synthesis → 4 red team → 1 final spec
+   - **Lite**: 3 recon (Sonnet) → 1 draft → 1 validation → 1 final spec
+   - **Quick**: 3 recon (Sonnet) → 1 direct spec
 4. Output lands in `.specs/<slug>/plans/SPEC.md`
 
 **Spec directory layout:**
@@ -49,6 +55,6 @@ acorn issue plan <repo> <title> [options]  # Create issue + immediately start sp
 
 **Label lifecycle:** `ready-for-spec` → `spec-in-progress` → `spec-review` → `spec-approved`
 
-**Session management:** Creates tmux sessions named `<repo>_specs_<slug>_claude` running Claude Code.
+**Session management:** Creates tmux sessions named `<repo>_specs_<slug>_claude` running Claude Code. Mode is stored in `meta.json` and shown in `acorn list`.
 
 For full command reference, use the `/acorn` command.

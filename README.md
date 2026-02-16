@@ -6,7 +6,15 @@ Ideas start small. Acorn grows them into something an agent can build.
 
 ## What It Does
 
-Acorn takes a GitHub issue and runs it through a 5-stage multi-agent planning pipeline to produce a detailed implementation specification (`SPEC.md`). The pipeline launches 13 Claude sub-agents across 5 stages — reconnaissance, drafting, evaluating, synthesizing, red-teaming, and finalizing — to produce a spec that's ready to hand to a developer or agent for implementation.
+Acorn takes a GitHub issue and runs it through a multi-agent planning pipeline to produce a detailed implementation specification (`SPEC.md`). Three pipeline modes let you trade thoroughness for speed:
+
+| Mode | Flag | Stages | Agents | Recon Model | Planning Model | Best For |
+|------|------|--------|--------|-------------|----------------|----------|
+| Full | _(default)_ | 6 | 14 | Opus | Opus | Complex features, architectural decisions |
+| Lite | `--lite` | 4 | 6 | Sonnet | Opus | Standard features, moderate complexity |
+| Quick | `--quick` | 2 | 4 | Sonnet | Opus | Simple features, time-sensitive changes |
+
+All modes ground planning in actual codebase reconnaissance. The difference is how many competing drafts, evaluations, and adversarial reviews are performed.
 
 **The pipeline:**
 
@@ -14,20 +22,14 @@ Acorn takes a GitHub issue and runs it through a 5-stage multi-agent planning pi
 GitHub Issue
     |
     v
-acorn create <repo> <issue#>
+acorn create <repo> <issue#> [--lite | --quick]
     |-- Fetches issue (title, body, comments)
     |-- Generates PROMPT.md with requirements + planning methodology
     |-- Sets GitHub label: spec-in-progress
     |-- Starts a detached Claude Code session in tmux
     |
     v
-5-Stage Multi-Agent Planning (13 sub-agents)
-    |-- Stage 0: 3 agents explore the codebase (architecture, relevant code, conventions)
-    |-- Stage 1: 4 agents draft plans with distinct architectural lenses
-    |-- Stage 2: 1 agent scores all drafts against a structured rubric
-    |-- Stage 3: 1 agent synthesizes a master plan using scored drafts
-    |-- Stage 4: 4 agents adversarially red-team the master plan
-    |-- Stage 5: 1 agent produces final SPEC.md with requirements traceability
+Multi-Agent Planning (mode-dependent)
     |
     v
 acorn approve <repo> <slug>
@@ -127,23 +129,19 @@ Acorn expects your projects to live at `~/Projects/<repo>/main/` (or `~/projects
       .specs/          <-- created by acorn
         42-add-auth/
           PROMPT.md    <-- generated requirements + planning methodology
-          meta.json    <-- metadata (repo, issue, session info)
-          recon/
-            architecture.md    <-- Stage 0: project structure & tech stack
-            relevant_code.md   <-- Stage 0: files & APIs relevant to the feature
-            conventions.md     <-- Stage 0: coding patterns & constraints
+          meta.json    <-- metadata (repo, issue, session info, mode)
+          recon/                        Full  Lite  Quick
+            architecture.md              Y     Y     Y
+            relevant_code.md             Y     Y     Y
+            conventions.md               Y     Y     Y
           plans/
-            draft_plan_1.md    <-- Stage 1: Minimal Surgery lens
-            draft_plan_2.md    <-- Stage 1: Clean Architecture lens
-            draft_plan_3.md    <-- Stage 1: Robustness-First lens
-            draft_plan_4.md    <-- Stage 1: Developer Experience lens
-            evaluation.md      <-- Stage 2: rubric scores for all drafts
-            master_plan.md     <-- Stage 3: synthesized master plan
-            red_team_1.md      <-- Stage 4: Requirements Auditor
-            red_team_2.md      <-- Stage 4: Ambiguity Hunter
-            red_team_3.md      <-- Stage 4: Codebase Validator
-            red_team_4.md      <-- Stage 4: Contradiction & Edge Case Finder
-            SPEC.md            <-- Stage 5: final implementation spec
+            draft_plan_1..4.md           Y     -     -
+            draft.md                     -     Y     -
+            evaluation.md                Y     -     -
+            master_plan.md               Y     -     -
+            validation.md                -     Y     -
+            red_team_1..4.md             Y     -     -
+            SPEC.md                      Y     Y     Y
 ```
 
 ## Usage
@@ -151,7 +149,14 @@ Acorn expects your projects to live at `~/Projects/<repo>/main/` (or `~/projects
 ### Create a spec from a GitHub issue
 
 ```bash
+# Full pipeline (default) — 14 agents, 6 stages
 acorn create myapp 42
+
+# Lite pipeline — 6 agents, 4 stages
+acorn create myapp 42 --lite
+
+# Quick pipeline — 4 agents, 2 stages
+acorn create myapp 42 --quick
 ```
 
 This will:
@@ -240,6 +245,10 @@ Options:
 ```bash
 acorn issue plan myapp "Add user authentication" \
   --body "We need OAuth2 login with Google and GitHub providers"
+
+# With lite or quick mode
+acorn issue plan myapp "Add user authentication" --lite \
+  --body "We need OAuth2 login with Google and GitHub providers"
 ```
 
 This combines `issue create` + `create` — it creates the GitHub issue and immediately starts spec generation.
@@ -257,24 +266,46 @@ Acorn manages these labels automatically (creates them if they don't exist):
 
 ## How the Planning Pipeline Works
 
-The `PROMPT.md` generated by Acorn contains embedded instructions for a 5-stage multi-agent planning methodology. When Claude Code reads it and you say "let's draft this", it orchestrates:
+The `PROMPT.md` generated by Acorn contains embedded instructions for the planning methodology (mode-dependent). When Claude Code reads it and you say "let's draft this", it orchestrates the pipeline.
 
-0. **Stage 0 — Codebase Reconnaissance**: 3 sub-agents explore the actual codebase from different angles (architecture, relevant code, conventions) to ground all subsequent work in reality
-1. **Stage 1 — Diverse Parallel Drafting**: 4 sub-agents each independently draft a complete implementation plan, each with a distinct architectural lens (Minimal Surgery, Clean Architecture, Robustness-First, Developer Experience)
-2. **Stage 2 — Rubric-Based Evaluation**: 1 sub-agent scores all 4 drafts against a structured rubric (requirements coverage, implementability, codebase consistency, completeness, feasibility, risk identification)
-3. **Stage 3 — Weighted Synthesis**: 1 sub-agent reads all drafts plus the evaluation scores and synthesizes a master plan, using scores to guide trade-offs
-4. **Stage 4 — Adversarial Red Team**: 4 sub-agents each attack the master plan from a different angle (requirements auditing, ambiguity hunting, codebase validation, contradiction/edge case finding)
-5. **Stage 5 — Final Spec**: 1 sub-agent incorporates all red team findings into the final `plans/SPEC.md` with a requirements traceability matrix and red team resolution log
+### Full Pipeline (default)
 
-**Total: 13 sub-agent launches. No shortcuts.**
+6 stages, 14 sub-agent launches:
 
-The orchestrator agent's only job is to launch sub-agents and confirm completion — it never writes plan content itself. This keeps its context window clean while leveraging 13 independent 200k-token contexts for thorough analysis.
+0. **Stage 0 — Codebase Reconnaissance**: 3 Opus sub-agents explore the actual codebase from different angles (architecture, relevant code, conventions)
+1. **Stage 1 — Diverse Parallel Drafting**: 4 Opus sub-agents each independently draft a complete implementation plan with a distinct architectural lens (Minimal Surgery, Clean Architecture, Robustness-First, Developer Experience)
+2. **Stage 2 — Rubric-Based Evaluation**: 1 Opus sub-agent scores all 4 drafts against a structured rubric
+3. **Stage 3 — Weighted Synthesis**: 1 Opus sub-agent synthesizes a master plan using scored drafts
+4. **Stage 4 — Adversarial Red Team**: 4 Opus sub-agents each attack the master plan from a different angle
+5. **Stage 5 — Final Spec**: 1 Opus sub-agent produces `plans/SPEC.md` with traceability matrix and red team resolution log
+
+### Lite Pipeline (`--lite`)
+
+4 stages, 6 sub-agent launches:
+
+0. **Stage 0 — Codebase Reconnaissance**: 3 Sonnet sub-agents (same recon as full)
+1. **Stage 1 — Comprehensive Draft**: 1 Opus sub-agent drafts a single plan balancing all four architectural lenses
+2. **Stage 2 — Combined Validation**: 1 Opus sub-agent performs requirements coverage, codebase fact-check, ambiguity audit, and edge case analysis
+3. **Stage 3 — Final Spec**: 1 Opus sub-agent incorporates validation findings into `plans/SPEC.md`
+
+### Quick Pipeline (`--quick`)
+
+2 stages, 4 sub-agent launches:
+
+0. **Stage 0 — Codebase Reconnaissance**: 3 Sonnet sub-agents (same recon as full)
+1. **Stage 1 — Direct Spec**: 1 Opus sub-agent reads recon + requirements and produces `plans/SPEC.md` directly
+
+### Orchestrator Design
+
+The orchestrator agent's only job is to launch sub-agents and confirm completion — it never writes plan content itself. This keeps its context window clean while leveraging independent 200k-token contexts for thorough analysis.
 
 ## Command Reference
 
 ```
-acorn create <repo> <issue-number> [--no-auto]
+acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]
     Create a spec from a GitHub issue, start a planning session, and auto-trigger planning
+    --lite    Use lite 4-stage pipeline (6 agents, Sonnet recon)
+    --quick   Use quick 2-stage pipeline (4 agents, Sonnet recon)
 
 acorn list [repo]
     List all specs and their status (optionally filtered by repo)
@@ -288,7 +319,7 @@ acorn clean <repo> <slug> [--remove-labels] [--yes]
 acorn issue create <repo> <title> [options]
     Create a new GitHub issue
 
-acorn issue plan <repo> <title> [options] [--no-auto]
+acorn issue plan <repo> <title> [options] [--no-auto] [--lite | --quick]
     Create a GitHub issue and immediately start spec creation
 ```
 

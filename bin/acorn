@@ -8,7 +8,14 @@ if [ -d "$HOME/Projects" ]; then
   PROJECTS_DIR="$HOME/Projects"
 fi
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
-AUTO_TRIGGER_MESSAGE="Read PROMPT.md in the current directory. It contains the requirements and the mandatory 5-stage multi-agent planning methodology. Execute the full methodology now - begin with Stage 0 (launch 3 parallel codebase reconnaissance sub-agents)."
+auto_trigger_message() {
+  local mode="${1:-full}"
+  case "$mode" in
+    full)  printf 'Read PROMPT.md in the current directory. It contains the requirements and the mandatory 5-stage multi-agent planning methodology. Execute the full methodology now - begin with Stage 0 (launch 3 parallel codebase reconnaissance sub-agents).' ;;
+    lite)  printf 'Read PROMPT.md in the current directory. It contains the requirements and the mandatory 3-stage lite planning methodology. Execute the lite methodology now - begin with Stage 0 (launch 3 parallel codebase reconnaissance sub-agents).' ;;
+    quick) printf 'Read PROMPT.md in the current directory. It contains the requirements and the mandatory quick planning methodology. Execute the quick methodology now - begin with Stage 0 (launch 3 parallel codebase reconnaissance sub-agents).' ;;
+  esac
+}
 
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*" >&2; }
@@ -17,12 +24,17 @@ die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage:
-  acorn create <repo> <issue-number> [--no-auto]
+  acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]
   acorn list [repo]
   acorn approve <repo> <slug>
   acorn clean <repo> <slug> [--remove-labels] [--yes]
   acorn issue create <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]...
-  acorn issue plan <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]... [--no-auto]
+  acorn issue plan <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]... [--no-auto] [--lite | --quick]
+
+Pipeline modes:
+  (default)   Full 6-stage pipeline — 14 agents, Opus recon + Opus planning
+  --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus planning
+  --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
 EOF
 }
 
@@ -169,6 +181,16 @@ comment_issue() {
 }
 
 planning_block() {
+  local mode="${1:-full}"
+  case "$mode" in
+    full)  planning_block_full ;;
+    lite)  planning_block_lite ;;
+    quick) planning_block_quick ;;
+    *)     die "Unknown planning mode: $mode" ;;
+  esac
+}
+
+planning_block_full() {
   cat <<'METHODOLOGY_EOF'
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS
 
@@ -620,6 +642,442 @@ The spec must be ready to be handed to a developer or agent for implementation w
 METHODOLOGY_EOF
 }
 
+planning_block_lite() {
+  cat <<'METHODOLOGY_EOF'
+## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (LITE MODE)
+
+> **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
+>
+> When the user says "let's draft this" (or any variation like "draft it", "start planning", "go", etc.),
+> you MUST execute the 3-stage lite pipeline described below.
+>
+> **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
+>
+> If you write ANY plan content yourself instead of delegating to sub-agents via the Task tool,
+> you have FAILED. Your ONLY job is to launch Task agents and wait for them to finish.
+
+> **RULES FOR SUB-AGENTS (include these in every sub-agent prompt):**
+>
+> - Sub-agents write ALL work to files using Write/Edit tools
+> - Sub-agents return ONLY: `Done. Output: [filepath]`
+> - Sub-agents MUST write in chunks of ~4000 tokens max (Write tool, then Edit to append)
+> - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
+> - Violation of these rules will blow up the orchestrator's context window
+
+---
+
+### Overview
+
+This is the **lite pipeline** — a faster alternative to the full 6-stage pipeline.
+It trades multi-draft competition and adversarial red-teaming for speed while keeping
+codebase-grounded recon and dedicated validation.
+
+You MUST execute these 4 stages in order. Each stage MUST use the Task tool to launch sub-agents.
+You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the work yourself.
+
+0. **Stage 0**: YOU launch 3 parallel Task agents → each explores the codebase from a different angle
+1. **Stage 1**: YOU launch 1 Task agent → drafts a single comprehensive plan balancing all architectural lenses
+2. **Stage 2**: YOU launch 1 Task agent → validates the draft against requirements, codebase facts, ambiguities, and edge cases
+3. **Stage 3**: YOU launch 1 Task agent → produces final SPEC.md incorporating validation findings
+
+Total: 6 Task agent launches across 4 stages (Stage 0 through Stage 3). No shortcuts.
+
+---
+
+### Stage 0: Codebase Reconnaissance
+
+YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "sonnet".
+
+**Each agent explores the actual codebase to ground all subsequent work in reality.**
+
+**Agent A — Architecture & Structure:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to understand:
+  - Directory layout and project structure
+  - Tech stack, frameworks, and languages used
+  - Build system and deployment model
+  - Key entry points and main modules
+  - Database schemas and data layer architecture
+- Write your findings to recon/architecture.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Focus on FACTS about the codebase, not opinions. Reference specific file paths.
+- Your final response must be ONLY: "Done. Output: recon/architecture.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Agent B — Relevant Code:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to identify:
+  - Files and modules most likely to be modified for this feature
+  - Existing APIs, endpoints, and interfaces relevant to the feature
+  - Data models, types, and schemas that would be affected
+  - Integration points with external services or systems
+  - Related existing functionality that the feature would interact with
+- Write your findings to recon/relevant_code.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
+- Your final response must be ONLY: "Done. Output: recon/relevant_code.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Agent C — Conventions & Constraints:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to document:
+  - Coding style and naming conventions used throughout
+  - Error handling patterns (how errors are thrown, caught, reported)
+  - Test framework, test file naming, test patterns and helpers
+  - CI/CD configuration and quality gates
+  - Dependency management approach
+  - Existing abstractions and utilities that should be reused
+  - Any CLAUDE.md, AGENTS.md, or contributing guidelines
+- Write your findings to recon/conventions.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Include concrete examples from the codebase. Reference specific file paths.
+- Your final response must be ONLY: "Done. Output: recon/conventions.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After all 3 complete:** Confirm all 3 files exist (recon/architecture.md, recon/relevant_code.md, recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
+
+---
+
+### Stage 1: Comprehensive Draft
+
+YOU MUST launch 1 Task tool call. Use model "opus".
+
+**A single drafter balances all four architectural lenses into one comprehensive plan.**
+
+**Prompt:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Plan Drafter. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+
+Draft a comprehensive implementation plan that balances these four perspectives:
+  1. **Minimal Surgery**: Touch the fewest files. Reuse everything that exists. Prefer modifying existing code over creating new files.
+  2. **Clean Architecture**: Proper separation of concerns, clear interfaces, extensibility where it matters.
+  3. **Robustness**: Error handling, validation, edge cases, rollback and recovery paths.
+  4. **Developer Experience**: Simplicity over cleverness. Clear naming. Obvious control flow. Minimal cognitive load.
+
+Cover: architecture, specific file changes with file paths and function signatures, data models, API design, error handling, testing strategy, migration plan, and risks.
+Be specific — reference actual file paths, function names, and code patterns from the recon documents.
+
+- Write your plan to plans/draft.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/draft.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After completion:** Confirm the file exists, then proceed to Stage 2. Do NOT read the file.
+
+---
+
+### Stage 2: Combined Validation
+
+YOU MUST launch 1 Task tool call. Use model "opus".
+
+**A single validator performs requirements coverage, codebase fact-checking, ambiguity audit, and edge case analysis.**
+
+**Prompt:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Plan Validator. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read plans/draft.md — this is the plan you must validate.
+
+Perform a combined validation covering four areas:
+
+**1. Requirements Coverage:**
+For EACH requirement in PROMPT.md:
+  - Is it addressed in the plan? WHERE exactly?
+  - Is the acceptance criteria testable and specific?
+  - What's missing?
+Produce a requirements coverage matrix.
+
+**2. Codebase Fact-Check:**
+Use Glob, Grep, and Read tools to verify every factual claim in the plan:
+  - Do referenced files and directories actually exist?
+  - Are function signatures and API contracts correct?
+  - Do data models and schemas match what's described?
+  - Are there existing utilities the plan reinvents instead of reusing?
+Document every factual error: what the plan claims vs what the codebase actually shows.
+
+**3. Ambiguity Audit:**
+For each major section:
+  - What information is missing that a developer would need?
+  - What has multiple valid interpretations?
+  - What requires implicit knowledge not stated in the plan?
+  - What order-of-operations dependencies are unstated?
+
+**4. Edge Cases & Risks:**
+  - Find edge cases NOT handled (empty inputs, concurrent access, partial failures, large data)
+  - Find error paths NOT covered (network failures, auth failures, invalid data, timeouts)
+  - Find internal contradictions or ordering dependencies that could break
+  - Identify security concerns (injection, auth bypass, data exposure)
+
+- Write your validation report to plans/validation.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/validation.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After completion:** Confirm the file exists, then proceed to Stage 3. Do NOT read the file.
+
+---
+
+### Stage 3: Final Spec
+
+YOU MUST launch 1 Task tool call. Use model "opus".
+
+**Prompt:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Final Spec agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read plans/draft.md (the implementation plan).
+- Read plans/validation.md (the validation report).
+
+Produce the FINAL, COMPLETE implementation specification. It MUST include:
+
+1. **Requirements Traceability Matrix**: For each requirement from the original issue, the exact
+   section of this spec that addresses it. Any requirement NOT addressed must be flagged as a gap
+   with explicit justification for why it was deferred.
+
+2. **Validation Resolution Log**: For each finding from the validation report, document:
+   - The finding (one-line summary)
+   - Resolution: how it was fixed in this spec, OR why it was deferred (with justification)
+   - Deferred items must include severity and recommended follow-up
+
+3. **Implementation Plan**: Step-by-step instructions with:
+   - Specific file paths and function signatures
+   - Data models and schema changes
+   - Implementation order with dependencies between steps
+   - Each step must be independently verifiable
+
+4. **Testing Strategy**: Grounded in the actual test framework and patterns found in recon.
+   - Unit tests, integration tests, and edge case tests
+   - Specific test file locations and naming conventions
+   - Test data and fixture requirements
+
+5. **Risk Register**: Unresolved risks with severity, likelihood, and mitigation strategies.
+
+The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
+
+- Write the final spec to plans/SPEC.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/SPEC.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After completion:** Read plans/SPEC.md and present it to the user. This is the ONLY file you read.
+
+---
+
+### Orchestrator Context Management — CRITICAL
+
+**Your context is precious. Sub-agents have their own 200k token contexts. You do NOT.**
+
+- Your ONLY job is to launch Task agents and confirm they completed. That's it.
+- You need ~1k tokens per stage. If your context grows beyond ~15k tokens, you broke a rule.
+- NEVER read sub-agent output files yourself (the ONLY exception: plans/SPEC.md at the very end)
+- NEVER consume sub-agent return messages beyond confirming the word "Done"
+- NEVER write plan content yourself — that's what the 6 sub-agents are for
+- If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
+METHODOLOGY_EOF
+}
+
+planning_block_quick() {
+  cat <<'METHODOLOGY_EOF'
+## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (QUICK MODE)
+
+> **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
+>
+> When the user says "let's draft this" (or any variation like "draft it", "start planning", "go", etc.),
+> you MUST execute the 2-stage quick pipeline described below.
+>
+> **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
+>
+> If you write ANY plan content yourself instead of delegating to sub-agents via the Task tool,
+> you have FAILED. Your ONLY job is to launch Task agents and wait for them to finish.
+
+> **RULES FOR SUB-AGENTS (include these in every sub-agent prompt):**
+>
+> - Sub-agents write ALL work to files using Write/Edit tools
+> - Sub-agents return ONLY: `Done. Output: [filepath]`
+> - Sub-agents MUST write in chunks of ~4000 tokens max (Write tool, then Edit to append)
+> - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
+> - Violation of these rules will blow up the orchestrator's context window
+
+---
+
+### Overview
+
+This is the **quick pipeline** — the fastest mode. Recon grounds the spec in the actual codebase,
+then a single agent produces SPEC.md directly. Best for straightforward features where speed matters
+more than multi-perspective analysis.
+
+You MUST execute these 2 stages in order. Each stage MUST use the Task tool to launch sub-agents.
+You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the work yourself.
+
+0. **Stage 0**: YOU launch 3 parallel Task agents → each explores the codebase from a different angle
+1. **Stage 1**: YOU launch 1 Task agent → reads recon + requirements → produces SPEC.md directly
+
+Total: 4 Task agent launches across 2 stages (Stage 0 and Stage 1). No shortcuts.
+
+---
+
+### Stage 0: Codebase Reconnaissance
+
+YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "sonnet".
+
+**Each agent explores the actual codebase to ground all subsequent work in reality.**
+
+**Agent A — Architecture & Structure:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to understand:
+  - Directory layout and project structure
+  - Tech stack, frameworks, and languages used
+  - Build system and deployment model
+  - Key entry points and main modules
+  - Database schemas and data layer architecture
+- Write your findings to recon/architecture.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Focus on FACTS about the codebase, not opinions. Reference specific file paths.
+- Your final response must be ONLY: "Done. Output: recon/architecture.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Agent B — Relevant Code:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to identify:
+  - Files and modules most likely to be modified for this feature
+  - Existing APIs, endpoints, and interfaces relevant to the feature
+  - Data models, types, and schemas that would be affected
+  - Integration points with external services or systems
+  - Related existing functionality that the feature would interact with
+- Write your findings to recon/relevant_code.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
+- Your final response must be ONLY: "Done. Output: recon/relevant_code.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**Agent C — Conventions & Constraints:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Explore the actual codebase using Glob, Grep, and Read tools to document:
+  - Coding style and naming conventions used throughout
+  - Error handling patterns (how errors are thrown, caught, reported)
+  - Test framework, test file naming, test patterns and helpers
+  - CI/CD configuration and quality gates
+  - Dependency management approach
+  - Existing abstractions and utilities that should be reused
+  - Any CLAUDE.md, AGENTS.md, or contributing guidelines
+- Write your findings to recon/conventions.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Include concrete examples from the codebase. Reference specific file paths.
+- Your final response must be ONLY: "Done. Output: recon/conventions.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After all 3 complete:** Confirm all 3 files exist (recon/architecture.md, recon/relevant_code.md, recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
+
+---
+
+### Stage 1: Direct Spec
+
+YOU MUST launch 1 Task tool call. Use model "opus".
+
+**A single agent reads all recon and requirements, then produces SPEC.md directly — no intermediaries.**
+
+**Prompt:**
+
+```
+CRITICAL SUB-AGENT INSTRUCTIONS:
+- You are the Spec Writer. You are a SUB-AGENT, not the orchestrator.
+- Read PROMPT.md for the full requirements.
+- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+
+Produce a COMPLETE implementation specification. Balance these perspectives:
+  1. **Minimal Surgery**: Reuse existing code, touch the fewest files possible.
+  2. **Clean Architecture**: Proper separation of concerns where it matters.
+  3. **Robustness**: Error handling, validation, edge cases.
+  4. **Developer Experience**: Simplicity, clear naming, obvious control flow.
+
+The spec MUST include:
+
+1. **Requirements Traceability Matrix**: For each requirement from the original issue, the exact
+   section of this spec that addresses it. Any requirement NOT addressed must be flagged as a gap
+   with explicit justification for why it was deferred.
+
+2. **Implementation Plan**: Step-by-step instructions with:
+   - Specific file paths and function signatures
+   - Data models and schema changes
+   - Implementation order with dependencies between steps
+   - Each step must be independently verifiable
+
+3. **Testing Strategy**: Grounded in the actual test framework and patterns found in recon.
+   - Unit tests, integration tests, and edge case tests
+   - Specific test file locations and naming conventions
+   - Test data and fixture requirements
+
+4. **Risk Register**: Known risks with severity, likelihood, and mitigation strategies.
+
+The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
+Be specific — reference actual file paths, function names, and code patterns from the recon documents.
+
+- Write the final spec to plans/SPEC.md
+- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
+- Your final response must be ONLY: "Done. Output: plans/SPEC.md"
+- Do NOT return any content, summaries, or explanations. ONLY the done message.
+```
+
+**After completion:** Read plans/SPEC.md and present it to the user. This is the ONLY file you read.
+
+---
+
+### Orchestrator Context Management — CRITICAL
+
+**Your context is precious. Sub-agents have their own 200k token contexts. You do NOT.**
+
+- Your ONLY job is to launch Task agents and confirm they completed. That's it.
+- You need ~1k tokens per stage. If your context grows beyond ~10k tokens, you broke a rule.
+- NEVER read sub-agent output files yourself (the ONLY exception: plans/SPEC.md at the very end)
+- NEVER consume sub-agent return messages beyond confirming the word "Done"
+- NEVER write plan content yourself — that's what the 4 sub-agents are for
+- If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
+METHODOLOGY_EOF
+}
+
 render_comments_block() {
   local issue_json="$1"
   printf '%s\n' "$issue_json" | jq -r '
@@ -637,6 +1095,7 @@ render_prompt_md() {
   local issue_body="$2"
   local issue_json="$3"
   local out_tmp="$4"
+  local mode="${5:-full}"
 
   {
     printf '# Feature Spec: %s\n\n' "$issue_title"
@@ -650,7 +1109,7 @@ render_prompt_md() {
     printf '## Discussion / Context\n\n'
     render_comments_block "$issue_json"
     printf '\n---\n\n'
-    planning_block
+    planning_block "$mode"
     printf '\n\n---\n\n'
     cat <<'EOF'
 ## Completion Protocol
@@ -739,6 +1198,7 @@ write_meta_json() {
   local slug="$5"
   local backend="$6"
   local session_name="$7"
+  local mode="${8:-full}"
 
   local ts
   ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -751,7 +1211,8 @@ write_meta_json() {
     --arg created_at "$ts" \
     --arg session_backend "$backend" \
     --arg session_name "$session_name" \
-    '{repo:$repo, issue_number:$issue_number, issue_title:$issue_title, slug:$slug, created_at:$created_at, session_backend:$session_backend, session_name:$session_name}' \
+    --arg mode "$mode" \
+    '{repo:$repo, issue_number:$issue_number, issue_title:$issue_title, slug:$slug, created_at:$created_at, session_backend:$session_backend, session_name:$session_name, mode:$mode}' \
     > "$path"
 }
 
@@ -823,7 +1284,7 @@ status_for_spec() {
 }
 
 print_list_header() {
-  printf '%-16s %-8s %-40s %-10s %-8s %s\n' "repo" "issue" "slug" "status" "age" "spec_path"
+  printf '%-16s %-8s %-40s %-10s %-6s %-8s %s\n' "repo" "issue" "slug" "status" "mode" "age" "spec_path"
 }
 
 print_list_row() {
@@ -831,9 +1292,10 @@ print_list_row() {
   local issue="$2"
   local slug="$3"
   local status="$4"
-  local age="$5"
-  local path="$6"
-  printf '%-16s %-8s %-40s %-10s %-8s %s\n' "$repo" "$issue" "$slug" "$status" "$age" "$path"
+  local mode="$5"
+  local age="$6"
+  local path="$7"
+  printf '%-16s %-8s %-40s %-10s %-6s %-8s %s\n' "$repo" "$issue" "$slug" "$status" "$mode" "$age" "$path"
 }
 
 list_specs_for_repo() {
@@ -854,9 +1316,13 @@ list_specs_for_repo() {
     issue="$(issue_number_from_slug "$slug")"
     local status
     status="$(status_for_spec "$repo_main" "$issue" "$dir")"
+    local mode="full"
+    if [ -f "$dir/meta.json" ]; then
+      mode="$(jq -r '.mode // "full"' "$dir/meta.json" 2>/dev/null || printf 'full')"
+    fi
     local age
     age="$(human_age "$(file_mtime_epoch "$dir")")"
-    print_list_row "$repo" "${issue:-?}" "$slug" "$status" "$age" "$dir"
+    print_list_row "$repo" "${issue:-?}" "$slug" "$status" "$mode" "$age" "$dir"
   done
 }
 
@@ -878,10 +1344,19 @@ cmd_create() {
   shift 2
 
   local auto_trigger=1
+  local mode="full"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --no-auto)
         auto_trigger=0
+        ;;
+      --lite)
+        [ "$mode" = "full" ] || die "--lite and --quick are mutually exclusive"
+        mode="lite"
+        ;;
+      --quick)
+        [ "$mode" = "full" ] || die "--lite and --quick are mutually exclusive"
+        mode="quick"
         ;;
       *)
         die "Unknown option for create: $1"
@@ -911,7 +1386,7 @@ cmd_create() {
   local prompt_path="$dir/PROMPT.md"
   if [ ! -f "$prompt_path" ]; then
     local tmp_path="$prompt_path.tmp"
-    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path"
+    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$mode"
     if ! validate_prompt_md "$tmp_path"; then
       rm -f "$tmp_path"
       die "Prompt generation failed: planning anchor missing"
@@ -950,15 +1425,16 @@ cmd_create() {
     started_new_session=1
 
     if [ "$auto_trigger" -eq 1 ]; then
-      send_auto_trigger "$session_name" "$AUTO_TRIGGER_MESSAGE"
+      send_auto_trigger "$session_name" "$(auto_trigger_message "$mode")"
       info "Auto-trigger queued (will send in ~5 seconds)"
     fi
   fi
 
-  write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "tmux" "$session_name"
+  write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "tmux" "$session_name" "$mode"
 
   echo ""
   echo "Created spec: $dir"
+  echo "Mode: $mode"
   echo "Session: $session_name"
   echo "Attach: tmux attach -t $session_name"
   if [ "$auto_trigger" -eq 1 ]; then
@@ -1188,12 +1664,12 @@ cmd_issue_plan() {
   local title="$2"
   shift 2
 
-  local auto_flag=""
+  local create_flags=()
   local issue_args=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --no-auto)
-        auto_flag="--no-auto"
+      --no-auto|--lite|--quick)
+        create_flags+=("$1")
         ;;
       *)
         issue_args+=("$1")
@@ -1203,7 +1679,7 @@ cmd_issue_plan() {
   done
 
   local result issue_num issue_url
-  result="$(create_issue_in_repo "$repo" "$title" "${issue_args[@]}")"
+  result="$(create_issue_in_repo "$repo" "$title" "${issue_args[@]+"${issue_args[@]}"}")"
   issue_num="$(printf '%s' "$result" | sed -n '1p')"
   issue_url="$(printf '%s' "$result" | sed -n '2p')"
 
@@ -1211,11 +1687,7 @@ cmd_issue_plan() {
   echo "Issue: #$issue_num"
   echo "URL: $issue_url"
   echo "Starting spec creation..."
-  if [ -n "$auto_flag" ]; then
-    cmd_create "$repo" "$issue_num" "$auto_flag"
-  else
-    cmd_create "$repo" "$issue_num"
-  fi
+  cmd_create "$repo" "$issue_num" "${create_flags[@]+"${create_flags[@]}"}"
 }
 
 main() {
