@@ -9,11 +9,12 @@ if [ -d "$HOME/Projects" ]; then
 fi
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
 auto_trigger_message() {
-  local mode="${1:-full}"
+  local spec_path="$1"
+  local mode="${2:-full}"
   case "$mode" in
-    full)  printf 'Read PROMPT.md in the current directory. It contains the requirements and the mandatory 5-stage multi-agent planning methodology. Execute the full methodology now - begin with Stage 0 (launch 3 parallel codebase reconnaissance sub-agents).' ;;
-    lite)  printf 'Read PROMPT.md in the current directory. It contains the requirements and the mandatory 3-stage lite planning methodology. Execute the lite methodology now - begin with Stage 0 (launch 3 parallel codebase reconnaissance sub-agents).' ;;
-    quick) printf 'Read PROMPT.md in the current directory. It contains the requirements and the mandatory quick planning methodology. Execute the quick methodology now - begin with Stage 0 (launch 3 parallel codebase reconnaissance sub-agents).' ;;
+    full)  printf 'Read %s/PROMPT.md and follow ALL instructions in it to execute the full 6-stage planning pipeline. Start with Stage 0 (Recon). Write all output files to %s/' "$spec_path" "$spec_path" ;;
+    lite)  printf 'Read %s/PROMPT.md and follow ALL instructions in it to execute the lite 4-stage planning pipeline. Start with Stage 0 (Recon). Write all output files to %s/' "$spec_path" "$spec_path" ;;
+    quick) printf 'Read %s/PROMPT.md and follow ALL instructions in it to execute the quick 2-stage planning pipeline. Start with Stage 0 (Recon). Write all output files to %s/' "$spec_path" "$spec_path" ;;
   esac
 }
 
@@ -182,16 +183,18 @@ comment_issue() {
 
 planning_block() {
   local mode="${1:-full}"
+  local spec_path="${2:-.}"
   case "$mode" in
-    full)  planning_block_full ;;
-    lite)  planning_block_lite ;;
-    quick) planning_block_quick ;;
+    full)  planning_block_full "$spec_path" ;;
+    lite)  planning_block_lite "$spec_path" ;;
+    quick) planning_block_quick "$spec_path" ;;
     *)     die "Unknown planning mode: $mode" ;;
   esac
 }
 
 planning_block_full() {
-  cat <<'METHODOLOGY_EOF'
+  local spec_path="${1:-.}"
+  cat <<'METHODOLOGY_EOF' | sed "s|__SPEC_PATH__|${spec_path}|g"
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS
 
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
@@ -241,17 +244,17 @@ YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use 
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to understand:
   - Directory layout and project structure
   - Tech stack, frameworks, and languages used
   - Build system and deployment model
   - Key entry points and main modules
   - Database schemas and data layer architecture
-- Write your findings to recon/architecture.md
+- Write your findings to __SPEC_PATH__/recon/architecture.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Focus on FACTS about the codebase, not opinions. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: recon/architecture.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/architecture.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -260,17 +263,17 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to identify:
   - Files and modules most likely to be modified for this feature
   - Existing APIs, endpoints, and interfaces relevant to the feature
   - Data models, types, and schemas that would be affected
   - Integration points with external services or systems
   - Related existing functionality that the feature would interact with
-- Write your findings to recon/relevant_code.md
+- Write your findings to __SPEC_PATH__/recon/relevant_code.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
-- Your final response must be ONLY: "Done. Output: recon/relevant_code.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/relevant_code.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -279,7 +282,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to document:
   - Coding style and naming conventions used throughout
   - Error handling patterns (how errors are thrown, caught, reported)
@@ -288,14 +291,14 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
   - Dependency management approach
   - Existing abstractions and utilities that should be reused
   - Any CLAUDE.md, AGENTS.md, or contributing guidelines
-- Write your findings to recon/conventions.md
+- Write your findings to __SPEC_PATH__/recon/conventions.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Include concrete examples from the codebase. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: recon/conventions.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/conventions.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
-**After all 3 complete:** Confirm all 3 files exist (recon/architecture.md, recon/relevant_code.md, recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
+**After all 3 complete:** Confirm all 3 files exist (__SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, __SPEC_PATH__/recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
 
 ---
 
@@ -309,14 +312,14 @@ Each sub-agent gets a distinct architectural lens that forces genuinely differen
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Minimal Surgery drafter. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/PROMPT.md for full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
 - YOUR LENS: Achieve the requirements with the SMALLEST possible change set. Touch the fewest files. Reuse everything that exists. Avoid new abstractions. Prefer modifying existing code over creating new files.
-- Write a detailed, complete implementation plan to plans/draft_plan_1.md
+- Write a detailed, complete implementation plan to __SPEC_PATH__/plans/draft_plan_1.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
 - Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-- Your final response must be ONLY: "Done. Output: plans/draft_plan_1.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft_plan_1.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -325,14 +328,14 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Clean Architecture drafter. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/PROMPT.md for full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
 - YOUR LENS: Design the RIGHT abstraction. Proper separation of concerns, clear interfaces, extensibility. Accept more files changed if the architecture is better. Think about how this feature fits into the broader system.
-- Write a detailed, complete implementation plan to plans/draft_plan_2.md
+- Write a detailed, complete implementation plan to __SPEC_PATH__/plans/draft_plan_2.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
 - Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-- Your final response must be ONLY: "Done. Output: plans/draft_plan_2.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft_plan_2.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -341,14 +344,14 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Robustness-First drafter. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/PROMPT.md for full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
 - YOUR LENS: Start from FAILURE MODES. What can go wrong? Design error handling, validation, and edge cases FIRST. Testing strategy drives the architecture. Every path must have explicit error handling. Consider rollback and recovery.
-- Write a detailed, complete implementation plan to plans/draft_plan_3.md
+- Write a detailed, complete implementation plan to __SPEC_PATH__/plans/draft_plan_3.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
 - Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-- Your final response must be ONLY: "Done. Output: plans/draft_plan_3.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft_plan_3.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -357,14 +360,14 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Developer Experience drafter. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/PROMPT.md for full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
 - YOUR LENS: Optimize for the NEXT DEVELOPER who reads this code. Simplicity over cleverness. Clear naming. Obvious control flow. Minimal cognitive load. If a junior developer would struggle to understand it, simplify it.
-- Write a detailed, complete implementation plan to plans/draft_plan_4.md
+- Write a detailed, complete implementation plan to __SPEC_PATH__/plans/draft_plan_4.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
 - Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-- Your final response must be ONLY: "Done. Output: plans/draft_plan_4.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft_plan_4.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -383,9 +386,9 @@ YOU MUST launch 1 Task tool call. Use model "opus".
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Rubric Evaluator. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
-- Read ALL of: plans/draft_plan_1.md through plans/draft_plan_4.md (4 drafts total).
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
+- Read ALL of: __SPEC_PATH__/plans/draft_plan_1.md through __SPEC_PATH__/plans/draft_plan_4.md (4 drafts total).
 
 Score EACH draft against this rubric (1-5 scale for each dimension):
 
@@ -426,9 +429,9 @@ Your output MUST include:
 - Weaknesses to avoid: specific flaws from each draft that the synthesizer must not repeat
 - Gap analysis: requirements or concerns not adequately addressed by ANY draft
 
-- Write your evaluation to plans/evaluation.md
+- Write your evaluation to __SPEC_PATH__/plans/evaluation.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/evaluation.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/evaluation.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -447,10 +450,10 @@ YOU MUST launch 1 Task tool call. Use model "opus".
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Synthesis agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
-- Read ALL of: plans/draft_plan_1.md through plans/draft_plan_4.md (4 drafts).
-- Read plans/evaluation.md (the rubric scores and comparative analysis).
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
+- Read ALL of: __SPEC_PATH__/plans/draft_plan_1.md through __SPEC_PATH__/plans/draft_plan_4.md (4 drafts).
+- Read __SPEC_PATH__/plans/evaluation.md (the rubric scores and comparative analysis).
 
 Synthesize a master implementation plan using the evaluation to guide decisions:
   - For dimensions where one draft clearly leads in score: adopt that draft's approach for those aspects
@@ -461,9 +464,9 @@ Synthesize a master implementation plan using the evaluation to guide decisions:
   - Address every gap identified in the gap analysis
   - The resulting plan must score 4+ on every rubric dimension
 
-- Write the master plan to plans/master_plan.md
+- Write the master plan to __SPEC_PATH__/plans/master_plan.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/master_plan.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/master_plan.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -482,11 +485,11 @@ YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Use 
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Requirements Auditor. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read plans/master_plan.md — this is the plan you must audit.
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/plans/master_plan.md — this is the plan you must audit.
 
 YOUR MISSION: Systematically verify every requirement from the original issue.
-For EACH requirement in PROMPT.md:
+For EACH requirement in __SPEC_PATH__/PROMPT.md:
   - Is it addressed in the master plan? WHERE exactly (quote the relevant section)?
   - Is the acceptance criteria testable and specific?
   - Could a developer implement it differently than intended due to ambiguity?
@@ -495,9 +498,9 @@ For EACH requirement in PROMPT.md:
 Produce a REQUIREMENTS COVERAGE MATRIX as a table:
 | Requirement | Addressed? | Location in Plan | Testable? | Gaps/Ambiguities |
 
-- Write your audit to plans/red_team_1.md
+- Write your audit to __SPEC_PATH__/plans/red_team_1.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/red_team_1.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/red_team_1.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -506,9 +509,9 @@ Produce a REQUIREMENTS COVERAGE MATRIX as a table:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Ambiguity Hunter. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
-- Read plans/master_plan.md — this is the plan you must attack.
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/plans/master_plan.md — this is the plan you must attack.
 
 YOUR MISSION: Try to implement each section of this spec and find where you would get STUCK.
 For each major section of the plan:
@@ -520,9 +523,9 @@ For each major section of the plan:
 
 Be adversarial. Assume the worst interpretation. Find every ambiguity.
 
-- Write your findings to plans/red_team_2.md
+- Write your findings to __SPEC_PATH__/plans/red_team_2.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/red_team_2.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/red_team_2.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -531,8 +534,8 @@ Be adversarial. Assume the worst interpretation. Find every ambiguity.
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Codebase Validator. You are a SUB-AGENT, not the orchestrator.
-- Read plans/master_plan.md — this is the plan you must validate.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/plans/master_plan.md — this is the plan you must validate.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
 
 YOUR MISSION: Read the ACTUAL CODEBASE and verify every factual claim in the master plan.
 Use Glob, Grep, and Read tools to check:
@@ -545,9 +548,9 @@ Use Glob, Grep, and Read tools to check:
 
 For every factual error, document: what the plan claims vs what the codebase actually shows.
 
-- Write your validation report to plans/red_team_3.md
+- Write your validation report to __SPEC_PATH__/plans/red_team_3.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/red_team_3.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/red_team_3.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -556,8 +559,8 @@ For every factual error, document: what the plan claims vs what the codebase act
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Contradiction & Edge Case Finder. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read plans/master_plan.md — this is the plan you must attack.
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/plans/master_plan.md — this is the plan you must attack.
 
 YOUR MISSION: Find internal contradictions, edge cases, and failure modes.
   - Find sections of the plan that CONTRADICT each other
@@ -569,9 +572,9 @@ YOUR MISSION: Find internal contradictions, edge cases, and failure modes.
 
 Be adversarial. Think like a chaos engineer. What breaks under stress?
 
-- Write your findings to plans/red_team_4.md
+- Write your findings to __SPEC_PATH__/plans/red_team_4.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/red_team_4.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/red_team_4.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -588,10 +591,10 @@ YOU MUST launch 1 Task tool call. Use model "opus".
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Final Spec agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
-- Read plans/master_plan.md (the master plan).
-- Read ALL of: plans/red_team_1.md through plans/red_team_4.md (4 red team reports).
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/plans/master_plan.md (the master plan).
+- Read ALL of: __SPEC_PATH__/plans/red_team_1.md through __SPEC_PATH__/plans/red_team_4.md (4 red team reports).
 
 Produce the FINAL, COMPLETE implementation specification. It MUST include:
 
@@ -619,13 +622,13 @@ Produce the FINAL, COMPLETE implementation specification. It MUST include:
 
 The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
 
-- Write the final spec to plans/SPEC.md
+- Write the final spec to __SPEC_PATH__/plans/SPEC.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/SPEC.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/SPEC.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
-**After completion:** Read plans/SPEC.md and present it to the user. This is the ONLY file you read.
+**After completion:** Read __SPEC_PATH__/plans/SPEC.md and present it to the user. This is the ONLY file you read.
 
 ---
 
@@ -635,7 +638,7 @@ The spec must be ready to be handed to a developer or agent for implementation w
 
 - Your ONLY job is to launch Task agents and confirm they completed. That's it.
 - You need ~1k tokens per stage. If your context grows beyond ~20k tokens, you broke a rule.
-- NEVER read sub-agent output files yourself (the ONLY exception: plans/SPEC.md at the very end)
+- NEVER read sub-agent output files yourself (the ONLY exception: __SPEC_PATH__/plans/SPEC.md at the very end)
 - NEVER consume sub-agent return messages beyond confirming the word "Done"
 - NEVER write plan content yourself — that's what the 13 sub-agents are for
 - If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
@@ -643,7 +646,8 @@ METHODOLOGY_EOF
 }
 
 planning_block_lite() {
-  cat <<'METHODOLOGY_EOF'
+  local spec_path="${1:-.}"
+  cat <<'METHODOLOGY_EOF' | sed "s|__SPEC_PATH__|${spec_path}|g"
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (LITE MODE)
 
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
@@ -695,17 +699,17 @@ YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use 
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to understand:
   - Directory layout and project structure
   - Tech stack, frameworks, and languages used
   - Build system and deployment model
   - Key entry points and main modules
   - Database schemas and data layer architecture
-- Write your findings to recon/architecture.md
+- Write your findings to __SPEC_PATH__/recon/architecture.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Focus on FACTS about the codebase, not opinions. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: recon/architecture.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/architecture.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -714,17 +718,17 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to identify:
   - Files and modules most likely to be modified for this feature
   - Existing APIs, endpoints, and interfaces relevant to the feature
   - Data models, types, and schemas that would be affected
   - Integration points with external services or systems
   - Related existing functionality that the feature would interact with
-- Write your findings to recon/relevant_code.md
+- Write your findings to __SPEC_PATH__/recon/relevant_code.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
-- Your final response must be ONLY: "Done. Output: recon/relevant_code.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/relevant_code.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -733,7 +737,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to document:
   - Coding style and naming conventions used throughout
   - Error handling patterns (how errors are thrown, caught, reported)
@@ -742,14 +746,14 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
   - Dependency management approach
   - Existing abstractions and utilities that should be reused
   - Any CLAUDE.md, AGENTS.md, or contributing guidelines
-- Write your findings to recon/conventions.md
+- Write your findings to __SPEC_PATH__/recon/conventions.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Include concrete examples from the codebase. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: recon/conventions.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/conventions.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
-**After all 3 complete:** Confirm all 3 files exist (recon/architecture.md, recon/relevant_code.md, recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
+**After all 3 complete:** Confirm all 3 files exist (__SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, __SPEC_PATH__/recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
 
 ---
 
@@ -764,8 +768,8 @@ YOU MUST launch 1 Task tool call. Use model "opus".
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Plan Drafter. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/PROMPT.md for full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
 
 Draft a comprehensive implementation plan that balances these four perspectives:
   1. **Minimal Surgery**: Touch the fewest files. Reuse everything that exists. Prefer modifying existing code over creating new files.
@@ -776,9 +780,9 @@ Draft a comprehensive implementation plan that balances these four perspectives:
 Cover: architecture, specific file changes with file paths and function signatures, data models, API design, error handling, testing strategy, migration plan, and risks.
 Be specific — reference actual file paths, function names, and code patterns from the recon documents.
 
-- Write your plan to plans/draft.md
+- Write your plan to __SPEC_PATH__/plans/draft.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/draft.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -797,14 +801,14 @@ YOU MUST launch 1 Task tool call. Use model "opus".
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Plan Validator. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
-- Read plans/draft.md — this is the plan you must validate.
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/plans/draft.md — this is the plan you must validate.
 
 Perform a combined validation covering four areas:
 
 **1. Requirements Coverage:**
-For EACH requirement in PROMPT.md:
+For EACH requirement in __SPEC_PATH__/PROMPT.md:
   - Is it addressed in the plan? WHERE exactly?
   - Is the acceptance criteria testable and specific?
   - What's missing?
@@ -831,9 +835,9 @@ For each major section:
   - Find internal contradictions or ordering dependencies that could break
   - Identify security concerns (injection, auth bypass, data exposure)
 
-- Write your validation report to plans/validation.md
+- Write your validation report to __SPEC_PATH__/plans/validation.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/validation.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/validation.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -850,10 +854,10 @@ YOU MUST launch 1 Task tool call. Use model "opus".
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Final Spec agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
-- Read plans/draft.md (the implementation plan).
-- Read plans/validation.md (the validation report).
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/plans/draft.md (the implementation plan).
+- Read __SPEC_PATH__/plans/validation.md (the validation report).
 
 Produce the FINAL, COMPLETE implementation specification. It MUST include:
 
@@ -881,13 +885,13 @@ Produce the FINAL, COMPLETE implementation specification. It MUST include:
 
 The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
 
-- Write the final spec to plans/SPEC.md
+- Write the final spec to __SPEC_PATH__/plans/SPEC.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/SPEC.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/SPEC.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
-**After completion:** Read plans/SPEC.md and present it to the user. This is the ONLY file you read.
+**After completion:** Read __SPEC_PATH__/plans/SPEC.md and present it to the user. This is the ONLY file you read.
 
 ---
 
@@ -897,7 +901,7 @@ The spec must be ready to be handed to a developer or agent for implementation w
 
 - Your ONLY job is to launch Task agents and confirm they completed. That's it.
 - You need ~1k tokens per stage. If your context grows beyond ~15k tokens, you broke a rule.
-- NEVER read sub-agent output files yourself (the ONLY exception: plans/SPEC.md at the very end)
+- NEVER read sub-agent output files yourself (the ONLY exception: __SPEC_PATH__/plans/SPEC.md at the very end)
 - NEVER consume sub-agent return messages beyond confirming the word "Done"
 - NEVER write plan content yourself — that's what the 6 sub-agents are for
 - If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
@@ -905,7 +909,8 @@ METHODOLOGY_EOF
 }
 
 planning_block_quick() {
-  cat <<'METHODOLOGY_EOF'
+  local spec_path="${1:-.}"
+  cat <<'METHODOLOGY_EOF' | sed "s|__SPEC_PATH__|${spec_path}|g"
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (QUICK MODE)
 
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
@@ -955,17 +960,17 @@ YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use 
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to understand:
   - Directory layout and project structure
   - Tech stack, frameworks, and languages used
   - Build system and deployment model
   - Key entry points and main modules
   - Database schemas and data layer architecture
-- Write your findings to recon/architecture.md
+- Write your findings to __SPEC_PATH__/recon/architecture.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Focus on FACTS about the codebase, not opinions. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: recon/architecture.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/architecture.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -974,17 +979,17 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to identify:
   - Files and modules most likely to be modified for this feature
   - Existing APIs, endpoints, and interfaces relevant to the feature
   - Data models, types, and schemas that would be affected
   - Integration points with external services or systems
   - Related existing functionality that the feature would interact with
-- Write your findings to recon/relevant_code.md
+- Write your findings to __SPEC_PATH__/recon/relevant_code.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
-- Your final response must be ONLY: "Done. Output: recon/relevant_code.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/relevant_code.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
@@ -993,7 +998,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md in the current directory to understand what feature is being planned.
+- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
 - Explore the actual codebase using Glob, Grep, and Read tools to document:
   - Coding style and naming conventions used throughout
   - Error handling patterns (how errors are thrown, caught, reported)
@@ -1002,14 +1007,14 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
   - Dependency management approach
   - Existing abstractions and utilities that should be reused
   - Any CLAUDE.md, AGENTS.md, or contributing guidelines
-- Write your findings to recon/conventions.md
+- Write your findings to __SPEC_PATH__/recon/conventions.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Include concrete examples from the codebase. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: recon/conventions.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/conventions.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
-**After all 3 complete:** Confirm all 3 files exist (recon/architecture.md, recon/relevant_code.md, recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
+**After all 3 complete:** Confirm all 3 files exist (__SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, __SPEC_PATH__/recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
 
 ---
 
@@ -1024,8 +1029,8 @@ YOU MUST launch 1 Task tool call. Use model "opus".
 ```
 CRITICAL SUB-AGENT INSTRUCTIONS:
 - You are the Spec Writer. You are a SUB-AGENT, not the orchestrator.
-- Read PROMPT.md for the full requirements.
-- Read recon/architecture.md, recon/relevant_code.md, and recon/conventions.md for codebase context.
+- Read __SPEC_PATH__/PROMPT.md for the full requirements.
+- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
 
 Produce a COMPLETE implementation specification. Balance these perspectives:
   1. **Minimal Surgery**: Reuse existing code, touch the fewest files possible.
@@ -1055,13 +1060,13 @@ The spec MUST include:
 The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
 Be specific — reference actual file paths, function names, and code patterns from the recon documents.
 
-- Write the final spec to plans/SPEC.md
+- Write the final spec to __SPEC_PATH__/plans/SPEC.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: plans/SPEC.md"
+- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/SPEC.md"
 - Do NOT return any content, summaries, or explanations. ONLY the done message.
 ```
 
-**After completion:** Read plans/SPEC.md and present it to the user. This is the ONLY file you read.
+**After completion:** Read __SPEC_PATH__/plans/SPEC.md and present it to the user. This is the ONLY file you read.
 
 ---
 
@@ -1071,7 +1076,7 @@ Be specific — reference actual file paths, function names, and code patterns f
 
 - Your ONLY job is to launch Task agents and confirm they completed. That's it.
 - You need ~1k tokens per stage. If your context grows beyond ~10k tokens, you broke a rule.
-- NEVER read sub-agent output files yourself (the ONLY exception: plans/SPEC.md at the very end)
+- NEVER read sub-agent output files yourself (the ONLY exception: __SPEC_PATH__/plans/SPEC.md at the very end)
 - NEVER consume sub-agent return messages beyond confirming the word "Done"
 - NEVER write plan content yourself — that's what the 4 sub-agents are for
 - If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
@@ -1096,6 +1101,7 @@ render_prompt_md() {
   local issue_json="$3"
   local out_tmp="$4"
   local mode="${5:-full}"
+  local spec_path="${6:-.}"
 
   {
     printf '# Feature Spec: %s\n\n' "$issue_title"
@@ -1109,7 +1115,7 @@ render_prompt_md() {
     printf '## Discussion / Context\n\n'
     render_comments_block "$issue_json"
     printf '\n---\n\n'
-    planning_block "$mode"
+    planning_block "$mode" "$spec_path"
     printf '\n\n---\n\n'
     cat <<'EOF'
 ## Completion Protocol
@@ -1386,7 +1392,7 @@ cmd_create() {
   local prompt_path="$dir/PROMPT.md"
   if [ ! -f "$prompt_path" ]; then
     local tmp_path="$prompt_path.tmp"
-    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$mode"
+    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$mode" "$dir"
     if ! validate_prompt_md "$tmp_path"; then
       rm -f "$tmp_path"
       die "Prompt generation failed: planning anchor missing"
@@ -1425,7 +1431,7 @@ cmd_create() {
     started_new_session=1
 
     if [ "$auto_trigger" -eq 1 ]; then
-      send_auto_trigger "$session_name" "$(auto_trigger_message "$mode")"
+      send_auto_trigger "$session_name" "$(auto_trigger_message "$dir" "$mode")"
       info "Auto-trigger queued (will send in ~5 seconds)"
     fi
   fi
