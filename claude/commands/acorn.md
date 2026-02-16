@@ -100,6 +100,8 @@ Specs are created at `~/Projects/<repo>/main/.specs/<issue#>-<slug>/`:
 .specs/<slug>/
   PROMPT.md              # Generated requirements + planning methodology
   meta.json              # Metadata (repo, issue, session info, mode)
+  images/                # Downloaded images from the GitHub issue
+    <hash>.png             (auto-downloaded, URLs rewritten in PROMPT.md)
   recon/                         Full  Lite  Quick
     architecture.md               Y     Y     Y
     relevant_code.md              Y     Y     Y
@@ -113,6 +115,14 @@ Specs are created at `~/Projects/<repo>/main/.specs/<issue#>-<slug>/`:
     red_team_1..4.md              Y     -     -
     SPEC.md                       Y     Y     Y
 ```
+
+## Image handling
+
+Issues with screenshots, mockups, or diagrams are automatically handled:
+- Images are downloaded to `images/` and URLs in PROMPT.md are rewritten to local paths
+- Planning agents can view images via the Read tool (Claude Code supports PNG, JPG, etc.)
+- The Architecture recon agent (Stage 0) is instructed to examine images when present
+- Failed downloads are graceful — original URLs are preserved in PROMPT.md
 
 ## GitHub label lifecycle
 

@@ -27,7 +27,7 @@ acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + i
 ```
 
 **How it works:**
-1. `acorn create` fetches the GitHub issue, generates a `PROMPT.md` with requirements + mode-specific planning methodology
+1. `acorn create` fetches the GitHub issue, downloads any images to `.specs/<slug>/images/`, and generates a `PROMPT.md` with requirements + mode-specific planning methodology (image URLs rewritten to local paths so agents can view them via the Read tool)
 2. A detached Claude Code session launches in tmux and auto-triggers planning
 3. The orchestrator agent runs the pipeline (mode-dependent):
    - **Full**: 3 recon → 4 drafts → 1 evaluation → 1 synthesis → 4 red team → 1 final spec
@@ -40,6 +40,8 @@ acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + i
 ~/Projects/<repo>/main/.specs/<slug>/
   PROMPT.md          # Generated requirements + planning methodology
   meta.json          # Metadata (repo, issue, session info)
+  images/            # Downloaded images from GitHub issue (auto-extracted)
+    <hash>.png         (URLs rewritten in PROMPT.md to local paths)
   recon/
     architecture.md    # Stage 0: project structure & tech stack
     relevant_code.md   # Stage 0: relevant files & APIs
