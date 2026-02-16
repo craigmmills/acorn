@@ -1217,14 +1217,14 @@ extract_image_urls() {
   {
     # Strategy 1: Standard image URLs with known extensions
     printf '%s' "$all_text" \
-      | grep -oE '!\[[^\]]*\]\([^)]+\)' \
+      | grep -oE '!\[[^]]*\]\([^)]+\)' \
       | sed -nE 's/.*\(([^ ")]+).*/\1/p' \
       | grep -iE '\.(png|jpe?g|gif|webp|svg)(\?[^[:space:]]*)?$' \
       || true
 
     # Strategy 2: GitHub asset UUID URLs (no extension)
     printf '%s' "$all_text" \
-      | grep -oE '!\[[^\]]*\]\([^)]+\)' \
+      | grep -oE '!\[[^]]*\]\([^)]+\)' \
       | sed -nE 's/.*\(([^ ")]+).*/\1/p' \
       | grep -E '^https://(github\.com/.*/assets/[0-9a-f-]+|private-user-images\.githubusercontent\.com/)' \
       || true
@@ -1306,7 +1306,7 @@ rewrite_image_urls_in_text() {
   while IFS=$'\t' read -r original_url local_path; do
     [ -n "$original_url" ] || continue
     # Use bash string replacement -- no sed escaping needed
-    result="${result//"$original_url"/"$local_path"}"
+    result="${result//"$original_url"/$local_path}"
   done < "$mapping_file"
 
   printf '%s' "$result"
@@ -2010,7 +2010,9 @@ main() {
   case "$cmd" in
     create)
       [ "$#" -ge 3 ] || { usage; exit 1; }
-      cmd_create "$2" "$3" "${@:4}"
+      local _c_repo="$2" _c_issue="$3"
+      shift 3
+      cmd_create "$_c_repo" "$_c_issue" "$@"
       ;;
     list)
       if [ "$#" -gt 2 ]; then
