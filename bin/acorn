@@ -1113,6 +1113,12 @@ render_prompt_md() {
   local out_tmp="$4"
   local mode="${5:-full}"
   local spec_path="${6:-.}"
+  local url_mapping_file="${7:-}"
+
+  # Rewrite image URLs in body if mapping exists
+  if [ -n "$url_mapping_file" ] && [ -f "$url_mapping_file" ] && [ -s "$url_mapping_file" ]; then
+    issue_body="$(rewrite_image_urls_in_text "$issue_body" "$url_mapping_file")"
+  fi
 
   {
     printf '# Feature Spec: %s\n\n' "$issue_title"
@@ -1124,7 +1130,12 @@ render_prompt_md() {
     fi
 
     printf '## Discussion / Context\n\n'
-    render_comments_block "$issue_json"
+    local comments_text
+    comments_text="$(render_comments_block "$issue_json")"
+    if [ -n "$url_mapping_file" ] && [ -f "$url_mapping_file" ] && [ -s "$url_mapping_file" ]; then
+      comments_text="$(rewrite_image_urls_in_text "$comments_text" "$url_mapping_file")"
+    fi
+    printf '%s' "$comments_text"
     printf '\n---\n\n'
     planning_block "$mode" "$spec_path"
     printf '\n\n---\n\n'
@@ -1145,6 +1156,148 @@ validate_prompt_md() {
   local prompt_path="$1"
   grep -q 'PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS' "$prompt_path" || return 1
   return 0
+}
+
+get_extension_from_url() {
+  local url="$1"
+  # Strip query parameters and fragments
+  local path="${url%%\?*}"
+  path="${path%%#*}"
+  # Extract extension
+  local ext="${path##*.}"
+  # Lowercase
+  ext="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
+  case "$ext" in
+    png|jpg|jpeg|gif|webp|svg) printf '%s' "$ext" ;;
+    *) printf 'png' ;;
+  esac
+}
+
+generate_image_filename() {
+  local url="$1"
+  local ext
+  ext="$(get_extension_from_url "$url")"
+
+  local hash
+  if command -v md5 >/dev/null 2>&1; then
+    hash="$(printf '%s' "$url" | md5)"
+  elif command -v md5sum >/dev/null 2>&1; then
+    hash="$(printf '%s' "$url" | md5sum | cut -d' ' -f1)"
+  else
+    hash="$(printf '%s' "$url" | cksum | cut -d' ' -f1)"
+  fi
+
+  printf '%s.%s' "$hash" "$ext"
+}
+
+extract_image_urls() {
+  local issue_json="$1"
+
+  # Combine body and all comment bodies into a text stream
+  local all_text
+  all_text="$(printf '%s' "$issue_json" | jq -r '
+    [.body // ""] + [(.comments // [])[] | .body // ""]
+    | .[]
+  ')" || true
+
+  [ -z "$all_text" ] && return 0
+
+  {
+    # Strategy 1: Standard image URLs with known extensions
+    printf '%s' "$all_text" \
+      | grep -oE '!\[[^\]]*\]\([^)]+\)' \
+      | sed -nE 's/.*\(([^ ")]+).*/\1/p' \
+      | grep -iE '\.(png|jpe?g|gif|webp|svg)(\?[^[:space:]]*)?$' \
+      || true
+
+    # Strategy 2: GitHub asset UUID URLs (no extension)
+    printf '%s' "$all_text" \
+      | grep -oE '!\[[^\]]*\]\([^)]+\)' \
+      | sed -nE 's/.*\(([^ ")]+).*/\1/p' \
+      | grep -E '^https://(github\.com/.*/assets/[0-9a-f-]+|private-user-images\.githubusercontent\.com/)' \
+      || true
+  } | sort -u
+}
+
+extract_and_download_images() {
+  local issue_json="$1"
+  local images_dir="$2"
+
+  require_cmds curl
+
+  local mapping_file
+  mapping_file="$(mktemp)"
+
+  mkdir -p "$images_dir"
+
+  local urls
+  urls="$(extract_image_urls "$issue_json")"
+
+  if [ -z "$urls" ]; then
+    info "No images found in issue" >&2
+    printf '%s' "$mapping_file"
+    return 0
+  fi
+
+  local url count=0 success=0
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    count=$((count + 1))
+
+    local filename
+    filename="$(generate_image_filename "$url")"
+    local output_path="$images_dir/$filename"
+    local relative_path="images/$filename"
+
+    # Skip if already downloaded (idempotent)
+    if [ -f "$output_path" ] && [ -s "$output_path" ]; then
+      info "Image already exists: $relative_path" >&2
+      printf '%s\t%s\n' "$url" "$relative_path" >> "$mapping_file"
+      success=$((success + 1))
+      continue
+    fi
+
+    # Download to temp file first, then move (atomic)
+    local tmp_download="$output_path.tmp"
+    if curl -fsSL --max-time 30 --retry 2 -o "$tmp_download" "$url" 2>/dev/null; then
+      if [ -s "$tmp_download" ]; then
+        mv "$tmp_download" "$output_path"
+        info "Downloaded: $relative_path" >&2
+        printf '%s\t%s\n' "$url" "$relative_path" >> "$mapping_file"
+        success=$((success + 1))
+      else
+        warn "Downloaded file is empty: $url"
+        rm -f "$tmp_download"
+      fi
+    else
+      warn "Failed to download image: $url (keeping original URL)"
+      rm -f "$tmp_download"
+    fi
+  done <<< "$urls"
+
+  info "Images: $success/$count downloaded successfully" >&2
+  printf '%s' "$mapping_file"
+}
+
+rewrite_image_urls_in_text() {
+  local text="$1"
+  local mapping_file="$2"
+
+  # Return text unchanged if no mapping
+  [ -n "$mapping_file" ] && [ -f "$mapping_file" ] && [ -s "$mapping_file" ] || {
+    printf '%s' "$text"
+    return 0
+  }
+
+  local result="$text"
+  local original_url local_path
+  while IFS=$'\t' read -r original_url local_path; do
+    [ -n "$original_url" ] || continue
+    # Use bash string replacement -- no sed escaping needed
+    result="${result//"$original_url"/"$local_path"}"
+  done < "$mapping_file"
+
+  printf '%s' "$result"
 }
 
 start_session() {
@@ -1508,16 +1661,24 @@ cmd_create() {
 
   mkdir -p "$dir/plans"
   mkdir -p "$dir/recon"
+  mkdir -p "$dir/images"
 
   local prompt_path="$dir/PROMPT.md"
   if [ ! -f "$prompt_path" ]; then
+    # Extract and download images from issue markdown
+    info "Extracting images from issue #$issue_number"
+    local url_mapping_file
+    url_mapping_file="$(extract_and_download_images "$issue_json" "$dir/images")"
+
     local tmp_path="$prompt_path.tmp"
-    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$mode" "$dir"
+    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$mode" "$dir" "$url_mapping_file"
     if ! validate_prompt_md "$tmp_path"; then
       rm -f "$tmp_path"
+      rm -f "$url_mapping_file"
       die "Prompt generation failed: planning anchor missing"
     fi
     mv "$tmp_path" "$prompt_path"
+    rm -f "$url_mapping_file"
     info "Generated $prompt_path"
   else
     info "PROMPT.md already exists, leaving as-is"
