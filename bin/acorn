@@ -226,6 +226,9 @@ planning_block_full() {
 > - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
 > - Violation of these rules will blow up the orchestrator's context window
 
+> **VISUAL ASSETS:** The GitHub issue may include images (screenshots, mockups, diagrams) downloaded
+> to `__SPEC_PATH__/images/`. Sub-agents should use the Read tool to examine any images when relevant.
+
 ---
 
 ### Overview
@@ -262,6 +265,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
   - Build system and deployment model
   - Key entry points and main modules
   - Database schemas and data layer architecture
+  - If __SPEC_PATH__/images/ exists, use the Read tool to examine any images for visual context (screenshots, mockups, diagrams)
 - Write your findings to __SPEC_PATH__/recon/architecture.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Focus on FACTS about the codebase, not opinions. Reference specific file paths.
@@ -679,6 +683,9 @@ planning_block_lite() {
 > - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
 > - Violation of these rules will blow up the orchestrator's context window
 
+> **VISUAL ASSETS:** The GitHub issue may include images (screenshots, mockups, diagrams) downloaded
+> to `__SPEC_PATH__/images/`. Sub-agents should use the Read tool to examine any images when relevant.
+
 ---
 
 ### Overview
@@ -717,6 +724,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
   - Build system and deployment model
   - Key entry points and main modules
   - Database schemas and data layer architecture
+  - If __SPEC_PATH__/images/ exists, use the Read tool to examine any images for visual context (screenshots, mockups, diagrams)
 - Write your findings to __SPEC_PATH__/recon/architecture.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Focus on FACTS about the codebase, not opinions. Reference specific file paths.
@@ -942,6 +950,9 @@ planning_block_quick() {
 > - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
 > - Violation of these rules will blow up the orchestrator's context window
 
+> **VISUAL ASSETS:** The GitHub issue may include images (screenshots, mockups, diagrams) downloaded
+> to `__SPEC_PATH__/images/`. Sub-agents should use the Read tool to examine any images when relevant.
+
 ---
 
 ### Overview
@@ -978,6 +989,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
   - Build system and deployment model
   - Key entry points and main modules
   - Database schemas and data layer architecture
+  - If __SPEC_PATH__/images/ exists, use the Read tool to examine any images for visual context (screenshots, mockups, diagrams)
 - Write your findings to __SPEC_PATH__/recon/architecture.md
 - Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
 - Focus on FACTS about the codebase, not opinions. Reference specific file paths.
