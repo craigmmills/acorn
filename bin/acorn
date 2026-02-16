@@ -27,6 +27,7 @@ usage() {
 Usage:
   acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]
   acorn list [repo]
+  acorn status [repo]
   acorn approve <repo> <slug>
   acorn clean <repo> <slug> [--remove-labels] [--yes]
   acorn issue create <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]...
@@ -114,6 +115,16 @@ canonical_session_name() {
 issue_number_from_slug() {
   local slug="$1"
   printf '%s' "$slug" | sed -nE 's/^([0-9]+)-.*/\1/p'
+}
+
+truncate_str() {
+  local str="$1"
+  local max_len="${2:-40}"
+  if [ "${#str}" -gt "$max_len" ]; then
+    printf '%s...' "${str:0:$((max_len - 3))}"
+  else
+    printf '%s' "$str"
+  fi
 }
 
 gh_issue_json() {
@@ -1196,6 +1207,40 @@ kill_session() {
   fi
 }
 
+session_state() {
+  local session_name="$1"
+  local has_meta="$2"
+
+  if [ -z "$session_name" ]; then
+    printf 'no-session'
+    return 0
+  fi
+
+  if ! command -v tmux >/dev/null 2>&1; then
+    printf 'unknown'
+    return 0
+  fi
+
+  if tmux has-session -t "$session_name" 2>/dev/null; then
+    printf 'running'
+  elif [ "$has_meta" -eq 1 ]; then
+    printf 'dead'
+  else
+    printf 'no-session'
+  fi
+}
+
+attach_command() {
+  local session_name="$1"
+  local state="$2"
+
+  if [ "$state" = "running" ]; then
+    printf 'tmux attach -t %s' "$session_name"
+  else
+    printf '%s' "—"
+  fi
+}
+
 write_meta_json() {
   local path="$1"
   local repo="$2"
@@ -1304,6 +1349,22 @@ print_list_row() {
   printf '%-16s %-8s %-40s %-10s %-6s %-8s %s\n' "$repo" "$issue" "$slug" "$status" "$mode" "$age" "$path"
 }
 
+print_status_header() {
+  printf '%-16s %-42s %-12s %-8s %-10s %s\n' \
+    "REPO" "SLUG" "SESSION" "BACKEND" "STATUS" "ATTACH"
+}
+
+print_status_row() {
+  local repo="$1"
+  local slug="$2"
+  local session="$3"
+  local backend="$4"
+  local status="$5"
+  local attach="$6"
+  printf '%-16s %-42s %-12s %-8s %-10s %s\n' \
+    "$repo" "$slug" "$session" "$backend" "$status" "$attach"
+}
+
 list_specs_for_repo() {
   local repo="$1"
   local repo_main
@@ -1340,6 +1401,65 @@ list_specs_all() {
     repo="$(basename "$(dirname "$main_dir")")"
     if [ -d "$main_dir/.specs" ]; then
       list_specs_for_repo "$repo"
+    fi
+  done
+}
+
+list_status_for_repo() {
+  local repo="$1"
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  local root
+  root="$(spec_root "$repo")"
+  [ -d "$root" ] || return 0
+
+  local dir
+  for dir in "$root"/*; do
+    [ -d "$dir" ] || continue
+
+    local slug
+    slug="$(basename "$dir")"
+
+    local session_name="" backend="tmux" has_meta=0
+    if [ -f "$dir/meta.json" ]; then
+      has_meta=1
+      session_name="$(jq -r '.session_name // ""' "$dir/meta.json" 2>/dev/null || true)"
+      backend="$(jq -r '.session_backend // "tmux"' "$dir/meta.json" 2>/dev/null || true)"
+    fi
+
+    [ -n "$backend" ] && [ "$backend" != "null" ] || backend="tmux"
+
+    if [ -z "$session_name" ] || [ "$session_name" = "null" ]; then
+      session_name="$(canonical_session_name "$repo" "$slug")"
+    fi
+
+    local state
+    state="$(session_state "$session_name" "$has_meta")"
+
+    local issue
+    issue="$(issue_number_from_slug "$slug")"
+    local pipeline_status
+    pipeline_status="$(status_for_spec "$repo_main" "$issue" "$dir")"
+
+    local attach
+    attach="$(attach_command "$session_name" "$state")"
+
+    local display_slug
+    display_slug="$(truncate_str "$slug" 40)"
+
+    print_status_row "$repo" "$display_slug" "$state" "$backend" "$pipeline_status" "$attach"
+  done
+}
+
+list_status_all() {
+  local main_dir
+  for main_dir in "$PROJECTS_DIR"/*/main; do
+    [ -d "$main_dir" ] || continue
+    local repo
+    repo="$(basename "$(dirname "$main_dir")")"
+    if [ -d "$main_dir/.specs" ]; then
+      list_status_for_repo "$repo"
     fi
   done
 }
@@ -1463,6 +1583,17 @@ cmd_list() {
     list_specs_for_repo "$repo"
   else
     list_specs_all
+  fi
+}
+
+cmd_status() {
+  local repo="${1:-}"
+  require_cmds jq
+  print_status_header
+  if [ -n "$repo" ]; then
+    list_status_for_repo "$repo"
+  else
+    list_status_all
   fi
 }
 
@@ -1714,6 +1845,13 @@ main() {
         exit 1
       fi
       cmd_list "${2:-}"
+      ;;
+    status)
+      if [ "$#" -gt 2 ]; then
+        usage
+        exit 1
+      fi
+      cmd_status "${2:-}"
       ;;
     approve)
       [ "$#" -eq 3 ] || { usage; exit 1; }

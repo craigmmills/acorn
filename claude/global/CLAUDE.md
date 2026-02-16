@@ -19,6 +19,7 @@ acorn create <repo> <issue#> --quick      # Quick pipeline (2 stages, 4 agents)
 acorn create <repo> <issue#> --no-auto    # Don't auto-trigger planning
 acorn list                                 # List all specs across all repos
 acorn list <repo>                          # List specs for a specific repo
+acorn status [repo]                        # Show session dashboard (running/dead/no-session)
 acorn approve <repo> <slug>               # Mark spec as approved for implementation
 acorn clean <repo> <slug> [--yes]         # Kill session + delete spec directory
 acorn issue create <repo> <title> [--body <text>] [--label <name>]... [--assignee <login>]...

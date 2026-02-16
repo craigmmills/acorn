@@ -7,6 +7,7 @@ Turns GitHub issues into agent-ready implementation specs via a multi-agent plan
 ```bash
 acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]  # Create spec from issue, start planning
 acorn list [repo]                                                    # List all specs and their status
+acorn status [repo]                                                  # Show session dashboard
 acorn approve <repo> <slug>                                          # Approve a completed spec
 acorn clean <repo> <slug> [--remove-labels] [--yes]                  # Remove spec + kill session
 acorn issue create <repo> <title> [options]                          # Create a GitHub issue
@@ -49,6 +50,19 @@ acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create is
 | `planning` | PROMPT.md exists, agent is working |
 | `review` | plans/SPEC.md exists, ready for human review |
 | `approved` | Spec has been approved for implementation |
+
+## Session dashboard
+
+`acorn status [repo]` shows a live dashboard of all spec sessions:
+
+| Column | Shows |
+|--------|-------|
+| REPO | Repository name |
+| SLUG | Spec slug (truncated to 40 chars) |
+| SESSION | `running` / `dead` / `no-session` |
+| BACKEND | Session backend from meta.json (`tmux`, `pi`) |
+| STATUS | Pipeline status (`planning` / `review` / `approved`) |
+| ATTACH | `tmux attach -t <session>` command (if running) |
 
 ## Pipeline stages by mode
 
