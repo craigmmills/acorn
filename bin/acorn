@@ -29,7 +29,7 @@ Usage:
   acorn list [repo]
   acorn status [repo]
   acorn approve <repo> <slug>
-  acorn clean <repo> <slug> [--remove-labels] [--yes]
+  acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
   acorn issue create <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]...
   acorn issue plan <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]... [--no-auto] [--lite | --quick]
 
@@ -1800,6 +1800,7 @@ cmd_clean() {
 
   local remove_labels=0
   local yes=0
+  local force=0
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -1808,6 +1809,9 @@ cmd_clean() {
         ;;
       --yes)
         yes=1
+        ;;
+      --force)
+        force=1
         ;;
       *)
         die "Unknown option for clean: $1"
@@ -1833,6 +1837,22 @@ cmd_clean() {
   if [ ! -d "$target" ]; then
     warn "Spec directory missing (already clean): $target"
     return 0
+  fi
+
+  # Safety check: refuse to delete specs that haven't been implemented yet
+  if [ "$force" -ne 1 ] && [ -f "$target/plans/SPEC.md" ]; then
+    local issue_number
+    issue_number="$(issue_number_from_slug "$slug")"
+    local issue_state="unknown"
+    if [ -n "$issue_number" ]; then
+      issue_state="$(cd "$repo_main" && gh issue view "$issue_number" --json state -q '.state' 2>/dev/null || printf 'unknown')"
+    fi
+    if [ "$issue_state" != "CLOSED" ]; then
+      warn "Spec has plans/SPEC.md but issue #${issue_number:-?} is still open (state: $issue_state)."
+      warn "This spec hasn't been implemented yet. Deleting it would lose the generated spec."
+      warn "Use --force to delete anyway, or close the issue first."
+      die "Refusing to clean unimplemented spec. Use: acorn clean $repo $slug --force"
+    fi
   fi
 
   if [ "$yes" -ne 1 ]; then
