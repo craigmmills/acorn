@@ -226,9 +226,14 @@ acorn clean myapp 42-add-authentication --yes
 
 # Also remove lifecycle labels from the issue
 acorn clean myapp 42-add-authentication --remove-labels --yes
+
+# Force delete even if SPEC.md exists and issue is still open
+acorn clean myapp 42-add-authentication --force --yes
 ```
 
 This kills the associated tmux session and deletes the spec directory.
+
+**Safety check:** If `plans/SPEC.md` exists and the GitHub issue is still open, `clean` will refuse to delete the spec directory — this prevents accidental loss of generated specs before implementation. Use `--force` to override.
 
 ### Create a GitHub issue
 
@@ -332,8 +337,8 @@ acorn list [repo]
 acorn approve <repo> <slug>
     Approve a completed spec for implementation
 
-acorn clean <repo> <slug> [--remove-labels] [--yes]
-    Remove a spec directory and kill its session
+acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
+    Remove a spec directory and kill its session (refuses if SPEC.md exists and issue is open; use --force to override)
 
 acorn issue create <repo> <title> [options]
     Create a new GitHub issue
@@ -371,7 +376,7 @@ Make sure `gh` is authenticated and has access to the repo. Run `gh auth status`
 Ensure tmux is installed (`brew install tmux`).
 
 **PROMPT.md already exists**
-`acorn create` is idempotent — it won't overwrite an existing PROMPT.md. To regenerate, clean first: `acorn clean <repo> <slug> --yes` then re-run create.
+`acorn create` is idempotent — it won't overwrite an existing PROMPT.md. To regenerate, clean first: `acorn clean <repo> <slug> --force --yes` then re-run create.
 
 **Auto-trigger doesn't fire**
 The auto-trigger sends the planning prompt to Claude Code via tmux after a ~5 second delay. If Claude Code hasn't finished initializing, attach to the session and send the trigger manually: say "let's draft this".

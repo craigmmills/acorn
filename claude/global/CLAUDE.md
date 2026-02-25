@@ -21,7 +21,7 @@ acorn list                                 # List all specs across all repos
 acorn list <repo>                          # List specs for a specific repo
 acorn status [repo]                        # Show session dashboard (running/dead/no-session)
 acorn approve <repo> <slug>               # Mark spec as approved for implementation
-acorn clean <repo> <slug> [--yes]         # Kill session + delete spec directory
+acorn clean <repo> <slug> [--yes] [--force] # Kill session + delete spec (refuses if SPEC.md exists and issue open; --force overrides)
 acorn issue create <repo> <title> [--body <text>] [--label <name>]... [--assignee <login>]...
 acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + immediately start spec generation
 ```

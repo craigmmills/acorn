@@ -9,7 +9,7 @@ acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]  # Create spec
 acorn list [repo]                                                    # List all specs and their status
 acorn status [repo]                                                  # Show session dashboard
 acorn approve <repo> <slug>                                          # Approve a completed spec
-acorn clean <repo> <slug> [--remove-labels] [--yes]                  # Remove spec + kill session
+acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]        # Remove spec + kill session
 acorn issue create <repo> <title> [options]                          # Create a GitHub issue
 acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create issue + start spec immediately
 ```
@@ -28,7 +28,7 @@ acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create is
 2. **Monitor**: `tmux attach -t <session>` to watch progress.
 3. **Review**: When status shows `review`, read `plans/SPEC.md` in the spec directory.
 4. **Approve**: `acorn approve <repo> <slug>` — sets the `spec-approved` label on the issue.
-5. **Clean up**: `acorn clean <repo> <slug> --yes` — kills session and removes spec directory.
+5. **Clean up**: `acorn clean <repo> <slug> --yes` — kills session and removes spec directory. **Safety:** refuses to delete if SPEC.md exists and the issue is still open (use `--force` to override).
 
 ## Options for create / issue plan
 
