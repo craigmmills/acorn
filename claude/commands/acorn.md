@@ -10,7 +10,7 @@ acorn list [repo]                                                    # List all 
 acorn status [repo]                                                  # Show session dashboard
 acorn approve <repo> <slug>                                          # Approve a completed spec
 acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]        # Remove spec + kill session
-acorn issue create <repo> <title> [options]                          # Create a GitHub issue
+acorn issue create <repo> <title> [options]                          # Create a GitHub issue (interactive template)
 acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create issue + start spec immediately
 ```
 
@@ -38,10 +38,49 @@ acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create is
 
 ## Options for issue create/plan
 
-- `--body <text>` — Issue body text
-- `--body-file <path>` — Read body from a file
+- `--body <text>` — Issue body text (bypasses interactive template)
+- `--body-file <path>` — Read body from a file (bypasses interactive template)
+- `--raw` — Skip the interactive template prompt
 - `--label <name>` — Add a label (repeatable)
 - `--assignee <login>` — Assign a user (repeatable)
+
+### Structured issue template
+
+When `--body`, `--body-file`, and `--raw` are all absent, `acorn issue create` enters interactive mode and prompts for five optional sections:
+
+1. **Job Story** — JTBD format: "When [situation], I want to [action], so I can [outcome]"
+2. **Promise** — "After this ships: [specific user-facing guarantee]"
+3. **Constraints** — What must not change, what's out of scope
+4. **Acceptance Criteria** — Specific, testable conditions that prove the promise is met
+5. **Context** — Examples, screenshots, links, prior art (optional)
+
+All sections are optional — press Enter to skip. If all sections are skipped, the issue is created with no body.
+
+When creating issues from Claude Code, fill in these sections programmatically via `--body`:
+
+```bash
+acorn issue create repo "Title" --body "## Job Story
+
+When [situation], I want to [action], so I can [outcome].
+
+## Promise
+
+After this ships: [guarantee]
+
+## Constraints
+
+[boundaries]
+
+## Acceptance Criteria
+
+- [ ] [condition]
+
+## Context
+
+[additional info]"
+```
+
+Ask the user for clarification when Job Story or Promise sections feel underspecified.
 
 ## Spec status values
 

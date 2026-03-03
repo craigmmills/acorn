@@ -22,9 +22,30 @@ acorn list <repo>                          # List specs for a specific repo
 acorn status [repo]                        # Show session dashboard (running/dead/no-session)
 acorn approve <repo> <slug>               # Mark spec as approved for implementation
 acorn clean <repo> <slug> [--yes] [--force] # Kill session + delete spec (refuses if SPEC.md exists and issue open; --force overrides)
-acorn issue create <repo> <title> [--body <text>] [--label <name>]... [--assignee <login>]...
+acorn issue create <repo> <title> [--body <text>] [--raw] [--label <name>]... [--assignee <login>]...
 acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + immediately start spec generation
 ```
+
+**Issue template format:** When using `acorn issue create` without `--body`/`--body-file`/`--raw`, an interactive template prompts for: Job Story (JTBD), Promise, Constraints, Acceptance Criteria, Context. All sections are optional. When creating issues programmatically, use `--body` with this markdown structure:
+
+```markdown
+## Job Story
+When [situation], I want to [action], so I can [outcome].
+
+## Promise
+After this ships: [guarantee]
+
+## Constraints
+[boundaries]
+
+## Acceptance Criteria
+- [ ] [condition]
+
+## Context
+[additional info]
+```
+
+Encourage the user to clarify underspecified Job Story or Promise sections before creating the issue.
 
 **How it works:**
 1. `acorn create` fetches the GitHub issue, downloads any images to `.specs/<slug>/images/`, and generates a `PROMPT.md` with requirements + mode-specific planning methodology (image URLs rewritten to local paths so agents can view them via the Read tool)

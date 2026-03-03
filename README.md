@@ -237,6 +237,16 @@ This kills the associated tmux session and deletes the spec directory.
 
 ### Create a GitHub issue
 
+By default, `acorn issue create` enters interactive mode and prompts for a structured template:
+
+```bash
+acorn issue create myapp "Add user authentication"
+# Prompts for: Job Story, Promise, Constraints, Acceptance Criteria, Context
+# All sections are optional — press Enter to skip
+```
+
+To bypass the template and provide the body directly:
+
 ```bash
 acorn issue create myapp "Add user authentication" \
   --body "We need OAuth2 login with Google and GitHub providers" \
@@ -244,21 +254,43 @@ acorn issue create myapp "Add user authentication" \
   --assignee "username"
 ```
 
+To create an issue with no body (skip template entirely):
+
+```bash
+acorn issue create myapp "Add user authentication" --raw
+```
+
 Options:
-- `--body <text>` — Issue body text
-- `--body-file <path>` — Read body from a file (mutually exclusive with `--body`)
+- `--body <text>` — Issue body text (bypasses interactive template)
+- `--body-file <path>` — Read body from a file (bypasses interactive template)
+- `--raw` — Skip the interactive template prompt
 - `--label <name>` — Add a label (repeatable)
 - `--assignee <login>` — Assign a user (repeatable)
+
+#### Template sections
+
+The interactive template collects five optional sections, optimized for AI spec generation:
+
+| Section | Format | Purpose |
+|---------|--------|---------|
+| Job Story | "When [situation], I want [action], so I can [outcome]" | Captures problem, user, and motivation |
+| Promise | "After this ships: [guarantee]" | Defines desired behavior as commitment |
+| Constraints | Free text | What must not change, out of scope |
+| Acceptance Criteria | Free text | Testable conditions proving promise is met |
+| Context | Free text | Examples, links, prior art |
 
 ### Create an issue and start planning immediately
 
 ```bash
+acorn issue plan myapp "Add user authentication"
+# Interactive template prompts, then immediately starts spec generation
+
+# With direct body (bypasses template)
 acorn issue plan myapp "Add user authentication" \
   --body "We need OAuth2 login with Google and GitHub providers"
 
 # With lite or quick mode
-acorn issue plan myapp "Add user authentication" --lite \
-  --body "We need OAuth2 login with Google and GitHub providers"
+acorn issue plan myapp "Add user authentication" --lite
 ```
 
 This combines `issue create` + `create` — it creates the GitHub issue and immediately starts spec generation.

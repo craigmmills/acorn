@@ -30,8 +30,8 @@ Usage:
   acorn status [repo]
   acorn approve <repo> <slug>
   acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
-  acorn issue create <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]...
-  acorn issue plan <repo> <title> [--body <text> | --body-file <path>] [--label <name>]... [--assignee <login>]... [--no-auto] [--lite | --quick]
+  acorn issue create <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]...
+  acorn issue plan <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]... [--no-auto] [--lite | --quick]
 
 Pipeline modes:
   (default)   Full 6-stage pipeline — 14 agents, Opus recon + Opus planning
@@ -1893,6 +1893,68 @@ cmd_clean() {
   fi
 }
 
+# Prompt the user interactively for structured issue sections.
+# Prints assembled markdown body to stdout.
+# Prompts are written to stderr so stdout remains clean for capture.
+# All sections are optional — pressing Enter skips a section.
+# Returns empty string if all sections are skipped.
+build_issue_body_interactive() {
+  local job_story="" promise="" constraints="" acceptance="" context=""
+
+  printf '\n' >&2
+  printf 'Structured issue template (press Enter to skip any section):\n' >&2
+  printf '\n' >&2
+
+  printf 'Job Story (When [situation], I want [action], so I can [outcome]):\n> ' >&2
+  IFS= read -r job_story || true
+
+  printf 'Promise (After this ships: [guarantee]):\n> ' >&2
+  IFS= read -r promise || true
+
+  printf 'Constraints (what must not change, out of scope):\n> ' >&2
+  IFS= read -r constraints || true
+
+  printf 'Acceptance Criteria (specific testable conditions):\n> ' >&2
+  IFS= read -r acceptance || true
+
+  printf 'Context (examples, links, prior art — optional):\n> ' >&2
+  IFS= read -r context || true
+
+  local body=""
+  local has_content=0
+
+  if [ -n "$job_story" ]; then
+    body+="## Job Story"$'\n\n'"$job_story"$'\n'
+    has_content=1
+  fi
+
+  if [ -n "$promise" ]; then
+    [ "$has_content" -eq 1 ] && body+=$'\n'
+    body+="## Promise"$'\n\n'"$promise"$'\n'
+    has_content=1
+  fi
+
+  if [ -n "$constraints" ]; then
+    [ "$has_content" -eq 1 ] && body+=$'\n'
+    body+="## Constraints"$'\n\n'"$constraints"$'\n'
+    has_content=1
+  fi
+
+  if [ -n "$acceptance" ]; then
+    [ "$has_content" -eq 1 ] && body+=$'\n'
+    body+="## Acceptance Criteria"$'\n\n'"$acceptance"$'\n'
+    has_content=1
+  fi
+
+  if [ -n "$context" ]; then
+    [ "$has_content" -eq 1 ] && body+=$'\n'
+    body+="## Context"$'\n\n'"$context"$'\n'
+    has_content=1
+  fi
+
+  printf '%s' "$body"
+}
+
 create_issue_in_repo() {
   local repo="$1"
   local title="$2"
@@ -1978,8 +2040,45 @@ cmd_issue_create() {
   local title="$2"
   shift 2
 
+  # Separate --raw from args passed to create_issue_in_repo
+  local raw=0
+  local pass_args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --raw)
+        raw=1
+        ;;
+      *)
+        pass_args+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  # Detect if --body or --body-file was provided
+  local has_body=0
+  local i
+  for i in "${pass_args[@]+"${pass_args[@]}"}"; do
+    case "$i" in
+      --body|--body-file) has_body=1; break ;;
+    esac
+  done
+
+  # Interactive template mode: no --raw, no --body, no --body-file, stdin is terminal
+  if [ "$raw" -eq 0 ] && [ "$has_body" -eq 0 ] && [ -t 0 ]; then
+    local tmpfile
+    tmpfile="$(mktemp)" || die "Failed to create temp file"
+    build_issue_body_interactive > "$tmpfile"
+    local template_body
+    template_body="$(<"$tmpfile")"
+    rm -f "$tmpfile"
+    if [ -n "$template_body" ]; then
+      pass_args+=(--body "$template_body")
+    fi
+  fi
+
   local result issue_num issue_url
-  result="$(create_issue_in_repo "$repo" "$title" "$@")"
+  result="$(create_issue_in_repo "$repo" "$title" "${pass_args[@]+"${pass_args[@]}"}")"
   issue_num="$(printf '%s' "$result" | sed -n '1p')"
   issue_url="$(printf '%s' "$result" | sed -n '2p')"
 
@@ -1996,10 +2095,14 @@ cmd_issue_plan() {
 
   local create_flags=()
   local issue_args=()
+  local raw=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --no-auto|--lite|--quick)
         create_flags+=("$1")
+        ;;
+      --raw)
+        raw=1
         ;;
       *)
         issue_args+=("$1")
@@ -2007,6 +2110,28 @@ cmd_issue_plan() {
     esac
     shift
   done
+
+  # Detect if --body or --body-file was provided
+  local has_body=0
+  local i
+  for i in "${issue_args[@]+"${issue_args[@]}"}"; do
+    case "$i" in
+      --body|--body-file) has_body=1; break ;;
+    esac
+  done
+
+  # Interactive template mode: no --raw, no --body, no --body-file, stdin is terminal
+  if [ "$raw" -eq 0 ] && [ "$has_body" -eq 0 ] && [ -t 0 ]; then
+    local tmpfile
+    tmpfile="$(mktemp)" || die "Failed to create temp file"
+    build_issue_body_interactive > "$tmpfile"
+    local template_body
+    template_body="$(<"$tmpfile")"
+    rm -f "$tmpfile"
+    if [ -n "$template_body" ]; then
+      issue_args+=(--body "$template_body")
+    fi
+  fi
 
   local result issue_num issue_url
   result="$(create_issue_in_repo "$repo" "$title" "${issue_args[@]+"${issue_args[@]}"}")"
