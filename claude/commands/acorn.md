@@ -12,6 +12,7 @@ acorn approve <repo> <slug>                                          # Approve a
 acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]        # Remove spec + kill session
 acorn issue create <repo> <title> [options]                          # Create a GitHub issue
 acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create issue + start spec immediately
+acorn issue clarify <repo> <issue-number>                            # Swap ai-drafted -> human-clarified
 ```
 
 ## Pipeline Modes
@@ -42,6 +43,10 @@ acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create is
 - `--body-file <path>` — Read body from a file
 - `--label <name>` — Add a label (repeatable)
 - `--assignee <login>` — Assign a user (repeatable)
+
+## `acorn issue clarify <repo> <issue-number>`
+
+Swaps the `ai-drafted` label to `human-clarified` on the specified issue. Ensures labels exist in the repo first.
 
 ## Spec status values
 
@@ -130,6 +135,8 @@ Issues with screenshots, mockups, or diagrams are automatically handled:
 |-------|--------|---------|
 | `spec-in-progress` | `acorn create` | Planning pipeline is running |
 | `spec-approved` | `acorn approve` | Spec approved for implementation |
+| `ai-drafted` | `acorn issue create`, `acorn issue plan` | Issue drafted by AI |
+| `human-clarified` | `acorn issue clarify` | Issue clarified by a human |
 
 ## Dependencies
 

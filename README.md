@@ -197,7 +197,7 @@ acorn list
 acorn list myapp
 ```
 
-Output shows repo, issue number, slug, status, age, and path.
+Output shows repo, issue number, slug, status, mode, age, clarification status, and path.
 
 **Status values:**
 - `planning` — PROMPT.md exists, agent is working
@@ -224,7 +224,7 @@ acorn clean myapp 42-add-authentication
 # Skip confirmation
 acorn clean myapp 42-add-authentication --yes
 
-# Also remove lifecycle labels from the issue
+# Also remove lifecycle + clarification labels from the issue
 acorn clean myapp 42-add-authentication --remove-labels --yes
 
 # Force delete even if SPEC.md exists and issue is still open
@@ -263,6 +263,15 @@ acorn issue plan myapp "Add user authentication" --lite \
 
 This combines `issue create` + `create` — it creates the GitHub issue and immediately starts spec generation.
 
+### Mark an issue as human-clarified
+
+```bash
+acorn issue clarify myapp 42
+# Output: Marked issue #42 in myapp as human-clarified
+```
+
+This swaps the clarification label from `ai-drafted` to `human-clarified` (or sets `human-clarified` if no clarification label is present).
+
 ## GitHub Label Lifecycle
 
 Acorn manages these labels automatically (creates them if they don't exist):
@@ -273,6 +282,15 @@ Acorn manages these labels automatically (creates them if they don't exist):
 | `spec-in-progress` | `acorn create` | Planning pipeline is running |
 | `spec-review` | Manual | Spec is ready for review |
 | `spec-approved` | `acorn approve` | Spec approved for implementation |
+
+### Clarification Labels
+
+These are orthogonal to lifecycle labels and indicate issue clarification status:
+
+| Label | Set By | Meaning |
+|-------|--------|---------|
+| `ai-drafted` | `acorn issue create`, `acorn issue plan` | Issue was drafted by AI and needs human clarification |
+| `human-clarified` | `acorn issue clarify` | Issue has been reviewed and clarified by a human |
 
 ## How the Planning Pipeline Works
 
@@ -345,6 +363,9 @@ acorn issue create <repo> <title> [options]
 
 acorn issue plan <repo> <title> [options] [--no-auto] [--lite | --quick]
     Create a GitHub issue and immediately start spec creation
+
+acorn issue clarify <repo> <issue-number>
+    Mark an issue as human-clarified (swap from ai-drafted)
 ```
 
 ## Testing
@@ -352,10 +373,12 @@ acorn issue plan <repo> <title> [options] [--no-auto] [--lite | --quick]
 ```bash
 # Run unit tests (no network calls to GitHub API)
 bash test/test_images.sh
+bash test/test_labels.sh
 
-# Run full suite including integration test
-# (creates a temporary GitHub issue, runs acorn create, verifies image pipeline, cleans up)
+# Run full suites including integration tests
+# (creates temporary GitHub issues, verifies image/label flows, cleans up)
 INTEGRATION=1 bash test/test_images.sh
+INTEGRATION=1 bash test/test_labels.sh
 ```
 
 ## Troubleshooting

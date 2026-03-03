@@ -24,6 +24,7 @@ acorn approve <repo> <slug>               # Mark spec as approved for implementa
 acorn clean <repo> <slug> [--yes] [--force] # Kill session + delete spec (refuses if SPEC.md exists and issue open; --force overrides)
 acorn issue create <repo> <title> [--body <text>] [--label <name>]... [--assignee <login>]...
 acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + immediately start spec generation
+acorn issue clarify <repo> <issue#>    # Mark issue as human-clarified (swap from ai-drafted)
 ```
 
 **How it works:**
@@ -57,6 +58,8 @@ acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + i
 **Status values:** `planning` (agent working), `review` (SPEC.md ready), `approved` (greenlit for implementation), `unknown`
 
 **Label lifecycle:** `ready-for-spec` → `spec-in-progress` → `spec-review` → `spec-approved`
+
+**Clarification labels:** `ai-drafted` → `human-clarified` (orthogonal to spec lifecycle)
 
 **Session management:** Creates tmux sessions named `<repo>_specs_<slug>_claude` running Claude Code. Mode is stored in `meta.json` and shown in `acorn list`.
 
