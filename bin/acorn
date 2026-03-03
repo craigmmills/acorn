@@ -34,6 +34,7 @@ Usage:
   acorn issue create <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]...
   acorn issue plan <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]... [--no-auto] [--lite | --quick]
   acorn issue clarify <repo> <issue-number>
+  acorn issue split <repo> <issue-number> [--yes] [--model <model>]
 
 Pipeline modes:
   (default)   Full 6-stage pipeline — 14 agents, Opus recon + Opus planning
@@ -2082,6 +2083,192 @@ create_issue_in_repo() {
   printf '%s\n%s\n' "$issue_num" "$issue_url"
 }
 
+# Analyze an issue and return structured JSON split recommendation.
+# Uses claude -p (one-shot headless) for lightweight AI analysis.
+# Prints JSON to stdout. Info/warnings to stderr.
+analyze_issue_for_split() {
+  local issue_title="$1"
+  local issue_body="$2"
+  local issue_comments="${3:-}"
+  local model="${4:-claude-sonnet-4-5}"
+
+  local prompt
+  prompt="$(cat <<'SPLIT_PROMPT_EOF'
+You are analyzing a GitHub issue to determine whether it should be split into smaller, more focused issues.
+
+Evaluate the issue below. Consider:
+1. Does it contain multiple independent concerns or pieces of work?
+2. Could parts be implemented and shipped independently?
+3. Is it too large for a single atomic implementation?
+4. Are there distinct functional areas that would benefit from separate tracking?
+
+An issue should NOT be split if:
+- It's already focused on a single concern
+- The parts are tightly coupled and can't be implemented independently
+- Splitting would create unnecessary overhead for a small issue
+
+Respond with ONLY a JSON object (no markdown fencing, no explanation outside the JSON):
+{
+  "should_split": true or false,
+  "reasoning": "Brief explanation of your assessment",
+  "sub_issues": [
+    {"title": "Concise sub-issue title", "scope": "1-2 sentence scope description"},
+    ...
+  ]
+}
+
+If should_split is false, sub_issues should be an empty array.
+Each sub-issue should be independently implementable and testable.
+Aim for 2-5 sub-issues when splitting. Fewer than 2 means it should not be split.
+SPLIT_PROMPT_EOF
+  )"
+
+  local issue_content="# Issue: ${issue_title}"$'\n\n'"${issue_body}"
+  if [ -n "$issue_comments" ]; then
+    issue_content+=$'\n\n'"## Discussion"$'\n\n'"${issue_comments}"
+  fi
+
+  local full_prompt="${prompt}"$'\n\n'"---"$'\n\n'"${issue_content}"
+
+  printf '[INFO] %s\n' "Analyzing issue for split recommendation (model: $model)..." >&2
+
+  local stderr_file
+  stderr_file="$(mktemp)" || die "Failed to create temp file for stderr capture"
+
+  local response
+  response="$(printf '%s' "$full_prompt" | claude -p --model "$model" 2>"$stderr_file")" || {
+    local err_msg=""
+    [ -f "$stderr_file" ] && err_msg="$(<"$stderr_file")"
+    rm -f "$stderr_file"
+    die "Failed to get split analysis from Claude. Error: ${err_msg:-unknown}. Is the claude CLI installed and authenticated?"
+  }
+  rm -f "$stderr_file"
+
+  # Extract JSON from response (handle case where model wraps in markdown fencing)
+  local json=""
+  if printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
+    json="$(printf '%s' "$response" | jq -c .)"
+  fi
+
+  if [ -z "$json" ]; then
+    local fenced_json
+    fenced_json="$(printf '%s' "$response" | sed -n '/```json/,/```/p' | sed '1d;$d')"
+    if [ -n "$fenced_json" ] && printf '%s' "$fenced_json" | jq -e . >/dev/null 2>&1; then
+      json="$(printf '%s' "$fenced_json" | jq -c .)"
+    fi
+  fi
+
+  if [ -z "$json" ]; then
+    local fenced_generic
+    fenced_generic="$(printf '%s' "$response" | sed -n '/```/,/```/p' | sed '1d;$d')"
+    if [ -n "$fenced_generic" ] && printf '%s' "$fenced_generic" | jq -e . >/dev/null 2>&1; then
+      json="$(printf '%s' "$fenced_generic" | jq -c .)"
+    fi
+  fi
+
+  [ -n "$json" ] || die "Failed to parse split analysis response. Raw output: $response"
+
+  # Validate JSON structure using has() to avoid short-circuit on false values
+  printf '%s' "$json" | jq -e 'has("should_split") and has("reasoning") and has("sub_issues")' >/dev/null 2>&1 \
+    || die "Split analysis returned invalid JSON structure. Got: $json"
+
+  printf '%s' "$json"
+}
+
+# Format a split recommendation JSON as human-readable output.
+# Prints formatted recommendation to stdout.
+format_split_recommendation() {
+  local json="$1"
+  local parent_issue_number="$2"
+
+  local should_split reasoning
+  should_split="$(printf '%s' "$json" | jq -r '.should_split')"
+  reasoning="$(printf '%s' "$json" | jq -r '.reasoning')"
+
+  echo ""
+  echo "=== Split Analysis for Issue #${parent_issue_number} ==="
+  echo ""
+  echo "Recommendation: $([ "$should_split" = "true" ] && echo "SPLIT" || echo "DO NOT SPLIT")"
+  echo "Reasoning: $reasoning"
+
+  if [ "$should_split" = "true" ]; then
+    local count
+    count="$(printf '%s' "$json" | jq '.sub_issues | length')"
+    echo ""
+    echo "Proposed sub-issues ($count):"
+    echo ""
+
+    if [ "$count" -gt 0 ]; then
+      local i title scope
+      for i in $(seq 0 $((count - 1))); do
+        title="$(printf '%s' "$json" | jq -r ".sub_issues[$i].title")"
+        scope="$(printf '%s' "$json" | jq -r ".sub_issues[$i].scope")"
+        echo "  $((i + 1)). $title"
+        echo "     Scope: $scope"
+        echo ""
+      done
+    fi
+  fi
+}
+
+# Create sub-issues from split analysis JSON.
+# Prints created issue numbers and URLs to stdout.
+# Posts a summary comment on the parent issue.
+create_sub_issues() {
+  local repo="$1"
+  local parent_issue_number="$2"
+  local json="$3"
+
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  local count
+  count="$(printf '%s' "$json" | jq '.sub_issues | length')"
+
+  local created_issues=()
+  local i title scope sub_body result sub_num sub_url
+
+  if [ "$count" -gt 0 ]; then
+    for i in $(seq 0 $((count - 1))); do
+      title="$(printf '%s' "$json" | jq -r ".sub_issues[$i].title")"
+      scope="$(printf '%s' "$json" | jq -r ".sub_issues[$i].scope")"
+
+      sub_body="## Scope"$'\n\n'"${scope}"$'\n\n'"## Parent Issue"$'\n\n'"Split from #${parent_issue_number} by acorn."
+
+      result="$(create_issue_in_repo "$repo" "$title" --body "$sub_body")" \
+        || { warn "Failed to create sub-issue: $title"; continue; }
+
+      sub_num="$(printf '%s' "$result" | sed -n '1p')"
+      sub_url="$(printf '%s' "$result" | sed -n '2p')"
+
+      created_issues+=("${sub_num}"$'\t'"${title}"$'\t'"${sub_url}")
+      echo "  Created #$sub_num: $title"
+      echo "  URL: $sub_url"
+      echo ""
+    done
+  fi
+
+  # Post summary comment on parent issue
+  if [ "${#created_issues[@]}" -gt 0 ]; then
+    local comment_body="## Issue Split by Acorn"$'\n\n'
+    comment_body+="This issue has been split into the following sub-issues:"$'\n\n'
+
+    local entry cnum ctitle
+    for entry in "${created_issues[@]}"; do
+      cnum="$(printf '%s' "$entry" | cut -d$'\t' -f1)"
+      ctitle="$(printf '%s' "$entry" | cut -d$'\t' -f2)"
+      comment_body+="- #${cnum} -- ${ctitle}"$'\n'
+    done
+
+    comment_body+=$'\n'"Each sub-issue references this parent for traceability."
+
+    comment_issue "$repo_main" "$parent_issue_number" "$comment_body"
+    info "Posted split summary comment on issue #$parent_issue_number"
+  else
+    warn "No sub-issues were created successfully."
+  fi
+}
+
 cmd_issue_clarify() {
   local repo="$1"
   local issue_number="$2"
@@ -2094,6 +2281,115 @@ cmd_issue_clarify() {
   set_clarification_label "$repo_main" "$issue_number" "human-clarified"
 
   echo "Marked issue #$issue_number in $repo as human-clarified"
+}
+
+# Analyze an issue and recommend whether it should be split into sub-issues.
+# If splitting is recommended and the user accepts, creates the sub-issues
+# and posts a reference comment on the parent.
+#
+# Usage: acorn issue split <repo> <issue-number> [--yes] [--model <model>]
+cmd_issue_split() {
+  local repo="$1"
+  local issue_number="$2"
+  shift 2
+
+  local yes=0
+  local model="claude-sonnet-4-5"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --yes)
+        yes=1
+        ;;
+      --model)
+        [ "$#" -ge 2 ] || die "--model requires a value"
+        [ -n "$2" ] || die "--model requires a non-empty value"
+        model="$2"
+        shift
+        ;;
+      *)
+        die "Unknown option for issue split: $1"
+        ;;
+    esac
+    shift
+  done
+
+  require_cmds gh jq claude
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  # Fetch issue data
+  info "Fetching issue #$issue_number from $repo"
+  local issue_json
+  issue_json="$(gh_issue_json "$repo_main" "$issue_number")" \
+    || die "Failed to fetch issue #$issue_number"
+
+  local title body comments_rendered
+  title="$(printf '%s' "$issue_json" | jq -r '.title // "Untitled"')"
+  body="$(printf '%s' "$issue_json" | jq -r '.body // ""')"
+
+  # Reuse existing render_comments_block for comment formatting
+  comments_rendered="$(render_comments_block "$issue_json")"
+
+  # If no comments, render_comments_block returns placeholder text.
+  # Pass empty string to analysis when there are no real comments.
+  local comment_count
+  comment_count="$(printf '%s' "$issue_json" | jq '.comments | length')"
+  if [ "$comment_count" -eq 0 ]; then
+    comments_rendered=""
+  fi
+
+  # Analyze
+  local analysis
+  analysis="$(analyze_issue_for_split "$title" "$body" "$comments_rendered" "$model")"
+
+  # Display recommendation
+  format_split_recommendation "$analysis" "$issue_number"
+
+  # Check if split is recommended
+  local should_split
+  should_split="$(printf '%s' "$analysis" | jq -r '.should_split')"
+
+  if [ "$should_split" != "true" ]; then
+    echo "No split recommended. Proceed with the original issue."
+    echo "Next: acorn create $repo $issue_number"
+    return 0
+  fi
+
+  # Validate sub_issues has at least 2 entries
+  local sub_count
+  sub_count="$(printf '%s' "$analysis" | jq '.sub_issues | length')"
+  if [ "$sub_count" -lt 2 ]; then
+    warn "AI recommended split but provided fewer than 2 sub-issues ($sub_count). Treating as no-split."
+    echo "No actionable split recommendation. Proceed with the original issue."
+    echo "Next: acorn create $repo $issue_number"
+    return 0
+  fi
+
+  # Confirm with user
+  if [ "$yes" -ne 1 ]; then
+    if [ ! -t 0 ]; then
+      die "Split recommended but running non-interactively. Use --yes to auto-accept."
+    fi
+    printf 'Create these sub-issues? [y/N] '
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES) ;;
+      *)
+        info "Split rejected. Original issue unchanged."
+        return 0
+        ;;
+    esac
+  fi
+
+  # Create sub-issues
+  echo ""
+  echo "Creating sub-issues..."
+  echo ""
+  create_sub_issues "$repo" "$issue_number" "$analysis"
+
+  echo "Split complete. Original issue #$issue_number has been annotated."
+  echo "Next steps: run 'acorn create $repo <sub-issue#>' for each sub-issue."
 }
 
 cmd_issue_create() {
@@ -2279,6 +2575,13 @@ main() {
           local _cl_issue="$4"
           shift 4
           cmd_issue_clarify "$repo" "$_cl_issue"
+          ;;
+        split)
+          [ "$#" -ge 4 ] || { usage; exit 1; }
+          repo="$3"
+          local _sp_issue="$4"
+          shift 4
+          cmd_issue_split "$repo" "$_sp_issue" "$@"
           ;;
         *)
           usage

@@ -25,6 +25,7 @@ acorn clean <repo> <slug> [--yes] [--force] # Kill session + delete spec (refuse
 acorn issue create <repo> <title> [--body <text>] [--raw] [--label <name>]... [--assignee <login>]...
 acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + immediately start spec generation
 acorn issue clarify <repo> <issue#>    # Mark issue as human-clarified (swap from ai-drafted)
+acorn issue split <repo> <issue#> [--yes] [--model <model>]  # Analyze issue for splitting into sub-issues
 ```
 
 **Issue template format:** When using `acorn issue create` without `--body`/`--body-file`/`--raw`, an interactive template prompts for: Job Story (JTBD), Promise, Constraints, Acceptance Criteria, Context. All sections are optional. When creating issues programmatically, use `--body` with this markdown structure:

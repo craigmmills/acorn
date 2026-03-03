@@ -13,6 +13,7 @@ acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]        # Remove sp
 acorn issue create <repo> <title> [options]                          # Create a GitHub issue (interactive template)
 acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create issue + start spec immediately
 acorn issue clarify <repo> <issue-number>                            # Swap ai-drafted -> human-clarified
+acorn issue split <repo> <issue-number> [--yes] [--model <model>]    # Analyze issue and optionally create sub-issues
 ```
 
 ## Pipeline Modes
@@ -86,6 +87,23 @@ Ask the user for clarification when Job Story or Promise sections feel underspec
 ## `acorn issue clarify <repo> <issue-number>`
 
 Swaps the `ai-drafted` label to `human-clarified` on the specified issue. Ensures labels exist in the repo first.
+
+## `acorn issue split <repo> <issue-number> [--yes] [--model <model>]`
+
+Analyzes an existing GitHub issue and recommends whether it should be split into smaller sub-issues.
+
+**Options:**
+- `--yes` — Auto-accept split recommendations and skip confirmation prompt
+- `--model <model>` — Override the analysis model (default: `claude-sonnet-4-5`)
+
+**Flow:**
+1. Fetch issue title/body/comments from GitHub
+2. Send content to Claude (`claude -p`) for one-shot split analysis
+3. Display recommendation, reasoning, and proposed sub-issues (title + scope)
+4. If split is recommended, ask for confirmation (unless `--yes`)
+5. On acceptance, create sub-issues and post a summary comment on the parent
+
+If no split is recommended (or recommendation is invalid with fewer than 2 sub-issues), acorn leaves the original issue unchanged and prints next-step guidance to run `acorn create`.
 
 ## Spec status values
 
