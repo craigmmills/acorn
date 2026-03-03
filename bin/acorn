@@ -8,6 +8,7 @@ if [ -d "$HOME/Projects" ]; then
   PROJECTS_DIR="$HOME/Projects"
 fi
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
+CLARIFICATION_LABELS=("ai-drafted" "human-clarified")
 auto_trigger_message() {
   local spec_path="$1"
   local mode="${2:-full}"
@@ -32,6 +33,7 @@ Usage:
   acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
   acorn issue create <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]...
   acorn issue plan <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]... [--no-auto] [--lite | --quick]
+  acorn issue clarify <repo> <issue-number>
 
 Pipeline modes:
   (default)   Full 6-stage pipeline — 14 agents, Opus recon + Opus planning
@@ -145,6 +147,12 @@ ensure_labels() {
       gh label create "$label" --color "0052cc" --description "Acorn spec lifecycle" >/dev/null 2>&1
     ) || true
   done
+  for label in "${CLARIFICATION_LABELS[@]}"; do
+    (
+      cd "$repo_main"
+      gh label create "$label" --color "e4e669" --description "Acorn clarification status" >/dev/null 2>&1
+    ) || true
+  done
 }
 
 remove_issue_label_soft() {
@@ -174,6 +182,21 @@ set_issue_state_label() {
   local label
 
   for label in "${LIFECYCLE_LABELS[@]}"; do
+    if [ "$label" != "$target" ]; then
+      remove_issue_label_soft "$repo_main" "$issue_number" "$label"
+    fi
+  done
+
+  add_issue_label_hard "$repo_main" "$issue_number" "$target"
+}
+
+set_clarification_label() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local target="$3"
+  local label
+
+  for label in "${CLARIFICATION_LABELS[@]}"; do
     if [ "$label" != "$target" ]; then
       remove_issue_label_soft "$repo_main" "$issue_number" "$label"
     fi
@@ -1499,8 +1522,29 @@ status_for_spec() {
   fi
 }
 
+clarification_for_issue() {
+  local repo_main="$1"
+  local issue_number="$2"
+
+  [ -n "$issue_number" ] || { printf -- '--'; return 0; }
+
+  local labels_json
+  labels_json="$(
+    cd "$repo_main"
+    gh issue view "$issue_number" --json labels 2>/dev/null | jq -c '.labels // []'
+  )" || { printf -- '--'; return 0; }
+
+  if printf '%s' "$labels_json" | jq -e '.[] | select(.name == "human-clarified")' >/dev/null 2>&1; then
+    printf 'clarified'
+  elif printf '%s' "$labels_json" | jq -e '.[] | select(.name == "ai-drafted")' >/dev/null 2>&1; then
+    printf 'ai-drafted'
+  else
+    printf -- '--'
+  fi
+}
+
 print_list_header() {
-  printf '%-16s %-8s %-40s %-10s %-6s %-8s %s\n' "repo" "issue" "slug" "status" "mode" "age" "spec_path"
+  printf '%-16s %-8s %-40s %-10s %-6s %-8s %-11s %s\n' "repo" "issue" "slug" "status" "mode" "age" "clarify" "spec_path"
 }
 
 print_list_row() {
@@ -1510,8 +1554,9 @@ print_list_row() {
   local status="$4"
   local mode="$5"
   local age="$6"
-  local path="$7"
-  printf '%-16s %-8s %-40s %-10s %-6s %-8s %s\n' "$repo" "$issue" "$slug" "$status" "$mode" "$age" "$path"
+  local clarify="$7"
+  local path="$8"
+  printf '%-16s %-8s %-40s %-10s %-6s %-8s %-11s %s\n' "$repo" "$issue" "$slug" "$status" "$mode" "$age" "$clarify" "$path"
 }
 
 print_status_header() {
@@ -1548,13 +1593,15 @@ list_specs_for_repo() {
     issue="$(issue_number_from_slug "$slug")"
     local status
     status="$(status_for_spec "$repo_main" "$issue" "$dir")"
+    local clarify
+    clarify="$(clarification_for_issue "$repo_main" "$issue")"
     local mode="full"
     if [ -f "$dir/meta.json" ]; then
       mode="$(jq -r '.mode // "full"' "$dir/meta.json" 2>/dev/null || printf 'full')"
     fi
     local age
     age="$(human_age "$(file_mtime_epoch "$dir")")"
-    print_list_row "$repo" "${issue:-?}" "$slug" "$status" "$mode" "$age" "$dir"
+    print_list_row "$repo" "${issue:-?}" "$slug" "$status" "$mode" "$age" "$clarify" "$dir"
   done
 }
 
@@ -1884,7 +1931,7 @@ cmd_clean() {
     issue_number="$(issue_number_from_slug "$slug")"
     if [ -n "$issue_number" ]; then
       local label
-      for label in "${LIFECYCLE_LABELS[@]}"; do
+      for label in "${LIFECYCLE_LABELS[@]}" "${CLARIFICATION_LABELS[@]}"; do
         remove_issue_label_soft "$repo_main" "$issue_number" "$label"
       done
     else
@@ -2035,6 +2082,20 @@ create_issue_in_repo() {
   printf '%s\n%s\n' "$issue_num" "$issue_url"
 }
 
+cmd_issue_clarify() {
+  local repo="$1"
+  local issue_number="$2"
+
+  require_cmds gh
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  ensure_labels "$repo_main"
+  set_clarification_label "$repo_main" "$issue_number" "human-clarified"
+
+  echo "Marked issue #$issue_number in $repo as human-clarified"
+}
+
 cmd_issue_create() {
   local repo="$1"
   local title="$2"
@@ -2081,6 +2142,11 @@ cmd_issue_create() {
   result="$(create_issue_in_repo "$repo" "$title" "${pass_args[@]+"${pass_args[@]}"}")"
   issue_num="$(printf '%s' "$result" | sed -n '1p')"
   issue_url="$(printf '%s' "$result" | sed -n '2p')"
+
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+  ensure_labels "$repo_main"
+  set_clarification_label "$repo_main" "$issue_num" "ai-drafted"
 
   echo "Created issue in $repo"
   echo "Issue: #$issue_num"
@@ -2137,6 +2203,11 @@ cmd_issue_plan() {
   result="$(create_issue_in_repo "$repo" "$title" "${issue_args[@]+"${issue_args[@]}"}")"
   issue_num="$(printf '%s' "$result" | sed -n '1p')"
   issue_url="$(printf '%s' "$result" | sed -n '2p')"
+
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+  ensure_labels "$repo_main"
+  set_clarification_label "$repo_main" "$issue_num" "ai-drafted"
 
   echo "Created issue in $repo"
   echo "Issue: #$issue_num"
@@ -2201,6 +2272,13 @@ main() {
           title="$4"
           shift 4
           cmd_issue_plan "$repo" "$title" "$@"
+          ;;
+        clarify)
+          [ "$#" -ge 4 ] || { usage; exit 1; }
+          repo="$3"
+          local _cl_issue="$4"
+          shift 4
+          cmd_issue_clarify "$repo" "$_cl_issue"
           ;;
         *)
           usage
