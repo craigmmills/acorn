@@ -1,0 +1,14 @@
+{
+  "eval_id": 3,
+  "eval_name": "explicit-issues-mixed",
+  "prompt": "Run acorn on issues 12, 15, and 23 in replay. Issue 12 is a big auth overhaul, 15 is just adding a config option, and 23 is a new API endpoint. Spec only.",
+  "assertions": [
+    {"text": "Fetches specific issues by number using gh issue view"},
+    {"text": "Analyzes dependencies between the 3 issues"},
+    {"text": "Assigns full mode to issue 12 (auth overhaul - architecturally complex)"},
+    {"text": "Assigns quick mode to issue 15 (config option - small and well-defined)"},
+    {"text": "Assigns lite mode to issue 23 (new API endpoint - standard feature)"},
+    {"text": "Presents wave-ordered execution plan"},
+    {"text": "Includes a user confirmation checkpoint before executing"}
+  ]
+}

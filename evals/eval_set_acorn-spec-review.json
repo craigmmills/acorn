@@ -1,0 +1,82 @@
+[
+  {
+    "query": "the spec for the add-websocket-streaming issue in candles just landed. can you review it before i approve? check if it covers all the acceptance criteria",
+    "should_trigger": true
+  },
+  {
+    "query": "is the spec for issue 42 in replay ready to implement? give me a quality assessment — completeness, feasibility, alignment with the original issue",
+    "should_trigger": true
+  },
+  {
+    "query": "review the SPEC.md for add-auth-system in replay. i want to know if there are any gaps before i hand it off to an implementer",
+    "should_trigger": true
+  },
+  {
+    "query": "the spec for the rate-limiting feature is done. review it, approve if it looks good, and set up a worktree to start implementing",
+    "should_trigger": true
+  },
+  {
+    "query": "spec and implement issue 55 in candles — run it through acorn, review the spec when it lands, and kick off implementation automatically",
+    "should_trigger": true
+  },
+  {
+    "query": "i just ran acorn on 3 issues and all specs are in review status. can you go through each one and tell me which are ready to approve and which need work?",
+    "should_trigger": true
+  },
+  {
+    "query": "check the spec for the dark-mode issue in candles — did the red team reports flag anything critical that didn't make it into the final spec?",
+    "should_trigger": true
+  },
+  {
+    "query": "the add-csv-export spec looks good to me. approve it and start implementation — create the worktree and send the spec to the agent",
+    "should_trigger": true
+  },
+  {
+    "query": "i want to see if the spec for issue 78 actually solves the problem described in the job story, or if it drifted to solving something else",
+    "should_trigger": true
+  },
+  {
+    "query": "spec looks good, implement it. the slug is add-keyboard-shortcuts in the replay repo",
+    "should_trigger": true
+  },
+  {
+    "query": "can you run acorn create replay 42? use the full pipeline since it's a complex feature",
+    "should_trigger": false
+  },
+  {
+    "query": "i have an idea for adding notifications to the app. help me write it up as a github issue with the JTBD template",
+    "should_trigger": false
+  },
+  {
+    "query": "spec all the ready-for-spec issues in candles — there are about 6 of them. figure out dependencies and run them in the right order",
+    "should_trigger": false
+  },
+  {
+    "query": "help me understand the difference between acorn's full, lite, and quick pipeline modes",
+    "should_trigger": false
+  },
+  {
+    "query": "clean up the dead spec sessions in replay — kill the tmux sessions and delete the spec directories",
+    "should_trigger": false
+  },
+  {
+    "query": "check acorn status for replay and tell me which specs are still running vs which have finished",
+    "should_trigger": false
+  },
+  {
+    "query": "i need to split issue 88 in candles into smaller pieces. can you analyze what it's trying to do and suggest a decomposition?",
+    "should_trigger": false
+  },
+  {
+    "query": "the worktree agent implementing the auth feature seems stuck. check its last message and see what's going on",
+    "should_trigger": false
+  },
+  {
+    "query": "create a new issue in replay for adding user preferences. use the JTBD format — when a user wants to customize their dashboard layout...",
+    "should_trigger": false
+  },
+  {
+    "query": "merge the feature branch for add-csv-export into main and clean up the worktree",
+    "should_trigger": false
+  }
+]

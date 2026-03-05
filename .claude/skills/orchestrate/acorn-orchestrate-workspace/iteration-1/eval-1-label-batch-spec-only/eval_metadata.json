@@ -1,0 +1,14 @@
+{
+  "eval_id": 1,
+  "eval_name": "label-batch-spec-only",
+  "prompt": "Go through all the ready-for-spec issues in replay, analyze them for dependencies, and spec each one. Use full for anything that looks architecturally complex, lite for normal features, quick for small stuff. Just specs for now, no implementation.",
+  "assertions": [
+    {"text": "Uses gh issue list with label filter to discover issues"},
+    {"text": "Checks for existing specs in progress before processing"},
+    {"text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)"},
+    {"text": "Presents issues in wave-based execution plan with parallel grouping"},
+    {"text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity"},
+    {"text": "Includes a user confirmation checkpoint before executing"},
+    {"text": "Describes monitoring strategy using acorn status"}
+  ]
+}

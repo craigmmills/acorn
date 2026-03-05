@@ -1,0 +1,15 @@
+{
+  "eval_id": 2,
+  "eval_name": "guided-handoff",
+  "configuration": "with_skill",
+  "summary": {"pass_rate": 1.0, "passed": 7, "failed": 0, "total": 7},
+  "expectations": [
+    {"text": "Performs a structured review before discussing implementation", "passed": true, "evidence": "Full structured review in Step 2 with completeness/feasibility/alignment sections and checkboxes, followed by handoff in Step 4."},
+    {"text": "Calibrates review expectations to quick mode (doesn't penalize for missing red team analysis)", "passed": true, "evidence": "Explicitly states: 'I would not penalize the spec for lacking multi-perspective drafts or red team analysis, since quick mode is designed for simpler issues.' Notes red team absence as 'informational, not a deficiency.'"},
+    {"text": "After review, shows the user the handoff commands (acorn approve, dev wt, dev pi)", "passed": true, "evidence": "Shows all three commands: 'acorn approve candles rate-limiting', 'dev wt candles rate-limiting', 'dev candles/rate-limiting/pi' with explanations of each."},
+    {"text": "Includes the spec path so the implementer knows where to find it", "passed": true, "evidence": "Agent instruction includes: 'Read the implementation spec at ~/Projects/candles/main/.specs/rate-limiting/plans/SPEC.md'"},
+    {"text": "Lets the user control the handoff pace — doesn't auto-run commands", "passed": true, "evidence": "Ends with 'Want me to run any of these steps?' — presents commands for the user to drive, doesn't auto-execute."},
+    {"text": "Includes review notes or implementation guidance for the agent", "passed": true, "evidence": "Three specific implementation notes bridging review gaps: (1) use existing error envelope pattern for 429s, (2) add concurrent request tests and Redis failover tests, (3) verify Redis client/pool accessibility from middleware."},
+    {"text": "Mentions how to check agent progress (dev pi-status)", "passed": true, "evidence": "Shows: 'dev pi-status candles/rate-limiting --messages 1' under the Monitor progress section."}
+  ]
+}

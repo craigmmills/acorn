@@ -1,0 +1,70 @@
+{
+  "expectations": [
+    {
+      "text": "Uses gh issue list with label filter to discover issues",
+      "passed": true,
+      "evidence": "Step 1 shows: 'gh issue list -R <owner>/candles -l \"ready-for-spec\" --state open --json number,title,body,labels,comments'"
+    },
+    {
+      "text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+      "passed": true,
+      "evidence": "Step 2 covers explicit scanning and implicit analysis. Includes codebase exploration ('ls ~/Projects/candles/main/'), DAG construction, and cycle detection."
+    },
+    {
+      "text": "Presents issues in wave-based execution plan with parallel grouping",
+      "passed": true,
+      "evidence": "Step 2 shows wave grouping template. Step 4 shows a formatted plan with 3 waves."
+    },
+    {
+      "text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+      "passed": true,
+      "evidence": "Step 3 shows criteria table. Plans include per-issue mode and reasoning."
+    },
+    {
+      "text": "Includes a user confirmation checkpoint before executing",
+      "passed": true,
+      "evidence": "Step 4 ends with 'I would wait for user confirmation before executing' with adjustment options."
+    },
+    {
+      "text": "Describes monitoring strategy using acorn status",
+      "passed": true,
+      "evidence": "Steps 5-6 show monitoring with acorn status, filesystem checks, progress reports, and failure handling."
+    },
+    {
+      "text": "Includes implementation handoff plan with worktree creation in wave order",
+      "passed": true,
+      "evidence": "Step 6 shows: acorn approve, dev wt, dev candles/<branch>/pi, sending specs to agents, dev pi-status monitoring."
+    },
+    {
+      "text": "Addresses merging between waves so agents see updated codebase",
+      "passed": true,
+      "evidence": "Explicitly covered: 'Wave N+1 specs must NOT start until Wave N implementations are merged into main' with git merge, Docker teardown, and dev cleanup commands. Key Design Decision #2 reinforces this."
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 111.8,
+    "total_duration_seconds": 111.8
+  },
+  "claims": [
+    {
+      "claim": "Interleaved spec+implement cycle is necessary even for the spec phase",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Key insight section explains why you can't spec everything upfront: 'if issue #C depends on #A, and we spec #C before #A is implemented and merged, then #C's recon agents will examine the pre-#A codebase'"
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "reason": "Baseline also passes all 8 assertions at 100%. The assertions don't capture qualitative differences. The baseline actually has a stronger theoretical insight about the interleaved spec+implement cycle. Consider assertions that test nuanced reasoning quality, not just structural elements."
+      }
+    ],
+    "overall": "Non-discriminating -- baseline matches the with-skill output on all structural assertions."
+  }
+}

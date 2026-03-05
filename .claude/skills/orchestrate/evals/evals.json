@@ -1,0 +1,51 @@
+{
+  "skill_name": "acorn-orchestrate",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Go through all the ready-for-spec issues in replay, analyze them for dependencies, and spec each one. Use full for anything that looks architecturally complex, lite for normal features, quick for small stuff. Just specs for now, no implementation.",
+      "expected_output": "Should discover issues via gh, analyze dependencies, present a wave-ordered execution plan with mode assignments and reasoning, ask for confirmation, then execute acorn create commands in wave order with appropriate --lite/--quick flags.",
+      "files": [],
+      "expectations": [
+        "Uses gh issue list with label filter to discover issues",
+        "Checks for existing specs in progress before processing",
+        "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+        "Presents issues in wave-based execution plan with parallel grouping",
+        "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+        "Includes a user confirmation checkpoint before executing",
+        "Describes monitoring strategy using acorn status"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Spec and implement all the issues labeled ready-for-spec in candles. Order them by dependencies — I don't want recon seeing stale code. Kick off implementations after specs are done.",
+      "expected_output": "Should discover issues, analyze dependencies, present wave-ordered plan noting spec+implement mode, execute specs in dependency order, monitor progress, then set up worktrees and agent sessions in the same wave order for implementation.",
+      "files": [],
+      "expectations": [
+        "Uses gh issue list with label filter to discover issues",
+        "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+        "Presents issues in wave-based execution plan with parallel grouping",
+        "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+        "Includes a user confirmation checkpoint before executing",
+        "Describes monitoring strategy using acorn status",
+        "Includes implementation handoff plan with worktree creation in wave order",
+        "Addresses merging between waves so agents see updated codebase"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Run acorn on issues 12, 15, and 23 in replay. Issue 12 is a big auth overhaul, 15 is just adding a config option, and 23 is a new API endpoint. Spec only.",
+      "expected_output": "Should fetch the 3 specific issues, assign full mode to #12 (architectural), quick to #15 (config change), lite to #23 (standard feature), analyze dependencies between them, present wave-ordered plan, and execute after confirmation.",
+      "files": [],
+      "expectations": [
+        "Fetches specific issues by number using gh issue view",
+        "Analyzes dependencies between the 3 issues",
+        "Assigns full mode to issue 12 (auth overhaul - architecturally complex)",
+        "Assigns quick mode to issue 15 (config option - small and well-defined)",
+        "Assigns lite mode to issue 23 (new API endpoint - standard feature)",
+        "Presents wave-ordered execution plan",
+        "Includes a user confirmation checkpoint before executing"
+      ]
+    }
+  ]
+}

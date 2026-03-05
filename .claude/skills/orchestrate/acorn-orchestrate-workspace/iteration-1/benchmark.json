@@ -1,0 +1,393 @@
+{
+  "metadata": {
+    "skill_name": "acorn-orchestrate",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-03-05T07:53:07Z",
+    "evals_run": [
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 192.9,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Uses gh issue list with label filter to discover issues",
+          "passed": true,
+          "evidence": "Phase 1, Step 1b shows: 'gh issue list -R <owner>/replay -l \"ready-for-spec\" --state open --json number,title,body,labels,comments'"
+        },
+        {
+          "text": "Checks for existing specs in progress before processing",
+          "passed": true,
+          "evidence": "Phase 1, Step 1a shows 'acorn list replay' and explains: 'If any issues already have specs in planning or review status (from step 1a), I would note them: Issues #X, #Y already have specs in progress -- skipping unless you want to re-spec them.'"
+        },
+        {
+          "text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+          "passed": true,
+          "evidence": "Phase 2 has three substeps: 2a scans for explicit dependency signals ('depends on #X', 'blocked by #X'), 2b analyzes implicit dependencies with a subsystems table, 2c builds a full dependency DAG showing #12\u2192#18, #12\u2192#24, #15\u2192#24."
+        },
+        {
+          "text": "Presents issues in wave-based execution plan with parallel grouping",
+          "passed": true,
+          "evidence": "Phase 2, Step 2d shows: Wave 1 (5 parallel issues, no dependencies) and Wave 2 (2 issues after Wave 1 completes). Includes a formatted plan block in Phase 4."
+        },
+        {
+          "text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+          "passed": true,
+          "evidence": "Phase 3 has a detailed table with per-issue mode assignments and multi-sentence reasoning. Summary: 3 full (architectural), 2 lite (standard features), 2 quick (small changes). Each includes specific complexity signals."
+        },
+        {
+          "text": "Includes a user confirmation checkpoint before executing",
+          "passed": true,
+          "evidence": "Phase 4 explicitly says 'Before executing anything, I would present the following plan and wait for confirmation' and lists specific adjustment options: 'Change a mode', 'Reorder or drop issues', 'Split an issue first', 'Run everything in a single wave', 'Confirm as-is'."
+        },
+        {
+          "text": "Describes monitoring strategy using acorn status",
+          "passed": true,
+          "evidence": "Phase 6 shows 'acorn status replay' as primary monitoring, plus per-issue filesystem checks (ls recon/, ls plans/SPEC.md), expected completion order by mode, formatted progress reports, and failure handling with recovery commands."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 131.3,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Uses gh issue list with label filter to discover issues",
+          "passed": true,
+          "evidence": "Step 1 shows: 'gh issue list -R <owner>/candles -l \"ready-for-spec\" --state open --json number,title,body,labels,comments' plus git remote resolution."
+        },
+        {
+          "text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+          "passed": true,
+          "evidence": "Step 2 covers explicit scanning (keyword patterns) and implicit analysis (DB schema changes, new APIs, shared utilities, overlapping files). Includes cycle detection."
+        },
+        {
+          "text": "Presents issues in wave-based execution plan with parallel grouping",
+          "passed": true,
+          "evidence": "Step 2 shows a 3-wave example plan with reasoning for each grouping. Step 4 shows a formatted plan with wave structure."
+        },
+        {
+          "text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+          "passed": true,
+          "evidence": "Step 3 shows mode selection criteria table. Step 4 plan shows per-issue mode with reasoning (e.g., 'foundational data model, complex architectural decision' for full)."
+        },
+        {
+          "text": "Includes a user confirmation checkpoint before executing",
+          "passed": true,
+          "evidence": "Step 4 ends with 'I would wait for user confirmation before executing' with specific adjustment options (change mode, drop issue, reorder, split)."
+        },
+        {
+          "text": "Describes monitoring strategy using acorn status",
+          "passed": true,
+          "evidence": "Step 6 shows 'acorn status candles', granular file checks, progress reporting, failure handling, and a summary monitoring tools table."
+        },
+        {
+          "text": "Includes implementation handoff plan with worktree creation in wave order",
+          "passed": true,
+          "evidence": "Wave 1 Implementation Handoff section shows: acorn approve, dev wt candles, dev candles/<branch>/pi, sending SPEC.md path to agents, dev pi-status monitoring."
+        },
+        {
+          "text": "Addresses merging between waves so agents see updated codebase",
+          "passed": true,
+          "evidence": "Wave 1: Merge Before Wave 2 section explicitly covers git merge, COMPOSE_PROJECT_NAME docker compose down, dev cleanup. States 'This is critical for the user's requirement that recon doesn't see stale code.'"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 103.3,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Fetches specific issues by number using gh issue view",
+          "passed": true,
+          "evidence": "Step 1 shows three parallel commands: 'gh issue view 12 -R craigmills/replay', 'gh issue view 15 -R craigmills/replay', 'gh issue view 23 -R craigmills/replay' with --json fields."
+        },
+        {
+          "text": "Analyzes dependencies between the 3 issues",
+          "passed": true,
+          "evidence": "Step 2 analyzes each issue's scope and concludes: '#12 (auth) is foundational. #23 (API endpoint) likely depends on #12 if the endpoint is authenticated. #15 (config) is independent.' Includes dependency graph."
+        },
+        {
+          "text": "Assigns full mode to issue 12 (auth overhaul - architecturally complex)",
+          "passed": true,
+          "evidence": "Step 3 assigns full with reasoning: 'big auth overhaul = architectural, security-critical, multi-subsystem. Auth changes are architecturally significant, touching multiple subsystems. Security implications are non-trivial.'"
+        },
+        {
+          "text": "Assigns quick mode to issue 15 (config option - small and well-defined)",
+          "passed": true,
+          "evidence": "Step 3 assigns quick with reasoning: 'small, well-defined change. Likely touches 1-3 files. Spending 14 Opus agents on a config change would be wasteful.'"
+        },
+        {
+          "text": "Assigns lite mode to issue 23 (new API endpoint - standard feature)",
+          "passed": true,
+          "evidence": "Step 3 assigns lite with reasoning: 'normal feature work -- clear scope, non-trivial. Touches 3-8 files. Lite mode is the sweet spot here.'"
+        },
+        {
+          "text": "Presents wave-ordered execution plan",
+          "passed": true,
+          "evidence": "Step 4 shows: Wave 1 (#12 full + #15 quick, parallel) and Wave 2 (#23 lite, after wave 1). Includes note that #23 can move to Wave 1 if it doesn't need auth."
+        },
+        {
+          "text": "Includes a user confirmation checkpoint before executing",
+          "passed": true,
+          "evidence": "Step 4 explicitly shows 'I would then wait for the user to confirm or adjust before proceeding' with specific options (change mode, reorder, drop, split)."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 124.8,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Uses gh issue list with label filter to discover issues",
+          "passed": true,
+          "evidence": "Step 1, command 1b shows: 'gh issue list -R <owner>/replay -l \"ready-for-spec\" --state open --json number,title,body,labels,comments'"
+        },
+        {
+          "text": "Checks for existing specs in progress before processing",
+          "passed": true,
+          "evidence": "Step 1, command 1a shows 'acorn list replay' and step 1c describes cross-referencing results to exclude existing specs."
+        },
+        {
+          "text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+          "passed": true,
+          "evidence": "Step 2 describes scanning for explicit dependency signals and analyzing implicit dependencies with a pairwise comparison framework."
+        },
+        {
+          "text": "Presents issues in wave-based execution plan with parallel grouping",
+          "passed": true,
+          "evidence": "Step 3 shows a detailed wave-based plan template with parallel grouping within waves and sequential execution across waves."
+        },
+        {
+          "text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+          "passed": true,
+          "evidence": "Step 2 includes complexity assessment criteria for each mode. The plan template shows mode per issue with 1-line justification."
+        },
+        {
+          "text": "Includes a user confirmation checkpoint before executing",
+          "passed": true,
+          "evidence": "User Confirmation section explicitly states 'I would present this plan and wait for the user to confirm or adjust before executing anything' with specific adjustment options."
+        },
+        {
+          "text": "Describes monitoring strategy using acorn status",
+          "passed": true,
+          "evidence": "Step 4 shows 'acorn status replay' plus granular filesystem checks, progress reporting format, and failure handling."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 111.8,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Uses gh issue list with label filter to discover issues",
+          "passed": true,
+          "evidence": "Step 1 shows: 'gh issue list -R <owner>/candles -l \"ready-for-spec\" --state open --json number,title,body,labels,comments'"
+        },
+        {
+          "text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+          "passed": true,
+          "evidence": "Step 2 covers explicit scanning and implicit analysis. Includes codebase exploration ('ls ~/Projects/candles/main/'), DAG construction, and cycle detection."
+        },
+        {
+          "text": "Presents issues in wave-based execution plan with parallel grouping",
+          "passed": true,
+          "evidence": "Step 2 shows wave grouping template. Step 4 shows a formatted plan with 3 waves."
+        },
+        {
+          "text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+          "passed": true,
+          "evidence": "Step 3 shows criteria table. Plans include per-issue mode and reasoning."
+        },
+        {
+          "text": "Includes a user confirmation checkpoint before executing",
+          "passed": true,
+          "evidence": "Step 4 ends with 'I would wait for user confirmation before executing' with adjustment options."
+        },
+        {
+          "text": "Describes monitoring strategy using acorn status",
+          "passed": true,
+          "evidence": "Steps 5-6 show monitoring with acorn status, filesystem checks, progress reports, and failure handling."
+        },
+        {
+          "text": "Includes implementation handoff plan with worktree creation in wave order",
+          "passed": true,
+          "evidence": "Step 6 shows: acorn approve, dev wt, dev candles/<branch>/pi, sending specs to agents, dev pi-status monitoring."
+        },
+        {
+          "text": "Addresses merging between waves so agents see updated codebase",
+          "passed": true,
+          "evidence": "Explicitly covered: 'Wave N+1 specs must NOT start until Wave N implementations are merged into main' with git merge, Docker teardown, and dev cleanup commands. Key Design Decision #2 reinforces this."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.43,
+        "passed": 3,
+        "failed": 4,
+        "total": 7,
+        "time_seconds": 81.7,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Fetches specific issues by number using gh issue view",
+          "passed": false,
+          "evidence": "The output does not show fetching issues individually for analysis. It jumps directly to mode selection based on the user's descriptions and then launches all three with 'acorn create' (which fetches issues internally but doesn't expose them for dependency analysis)."
+        },
+        {
+          "text": "Analyzes dependencies between the 3 issues",
+          "passed": false,
+          "evidence": "No dependency analysis performed. Step 1 states 'All three commands are independent and can be run in parallel' without examining whether #23's API endpoint depends on #12's auth changes."
+        },
+        {
+          "text": "Assigns full mode to issue 12 (auth overhaul - architecturally complex)",
+          "passed": true,
+          "evidence": "Correctly assigns Full mode with detailed reasoning: 'cross-cutting concern that touches middleware, database schemas, session management, API routes. 4 diverse draft plans will explore different architectural approaches.'"
+        },
+        {
+          "text": "Assigns quick mode to issue 15 (config option - small and well-defined)",
+          "passed": true,
+          "evidence": "Correctly assigns Quick mode: 'bounded, well-understood change. This does not warrant 14 agents and 6 stages.'"
+        },
+        {
+          "text": "Assigns lite mode to issue 23 (new API endpoint - standard feature)",
+          "passed": true,
+          "evidence": "Correctly assigns Lite mode: 'standard feature with moderate complexity. Lite pipeline provides enough rigor without the overhead of the full pipeline.'"
+        },
+        {
+          "text": "Presents wave-ordered execution plan",
+          "passed": false,
+          "evidence": "No wave ordering. All 3 issues launched in parallel: 'All three commands are independent and can be run in parallel.' No dependency analysis to justify ordering."
+        },
+        {
+          "text": "Includes a user confirmation checkpoint before executing",
+          "passed": false,
+          "evidence": "No explicit confirmation checkpoint. The 'What I Would Present to the User - Before Execution' section announces what will happen but does not ask for confirmation or offer adjustment options. Goes straight from mode selection to 'Step 1: Launch All Three Spec Pipelines.'"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 142.5,
+        "stddev": 45.838,
+        "min": 103.3,
+        "max": 192.9
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.81,
+        "stddev": 0.3291,
+        "min": 0.43,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 106.1,
+        "stddev": 22.1081,
+        "min": 81.7,
+        "max": 124.8
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.19",
+      "time_seconds": "+36.4",
+      "tokens": "+0"
+    }
+  },
+  "notes": []
+}

@@ -1,0 +1,81 @@
+{
+  "expectations": [
+    {
+      "text": "Uses gh issue list with label filter to discover issues",
+      "passed": true,
+      "evidence": "Phase 1, Step 1b shows: 'gh issue list -R <owner>/replay -l \"ready-for-spec\" --state open --json number,title,body,labels,comments'"
+    },
+    {
+      "text": "Checks for existing specs in progress before processing",
+      "passed": true,
+      "evidence": "Phase 1, Step 1a shows 'acorn list replay' and explains: 'If any issues already have specs in planning or review status (from step 1a), I would note them: Issues #X, #Y already have specs in progress -- skipping unless you want to re-spec them.'"
+    },
+    {
+      "text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+      "passed": true,
+      "evidence": "Phase 2 has three substeps: 2a scans for explicit dependency signals ('depends on #X', 'blocked by #X'), 2b analyzes implicit dependencies with a subsystems table, 2c builds a full dependency DAG showing #12→#18, #12→#24, #15→#24."
+    },
+    {
+      "text": "Presents issues in wave-based execution plan with parallel grouping",
+      "passed": true,
+      "evidence": "Phase 2, Step 2d shows: Wave 1 (5 parallel issues, no dependencies) and Wave 2 (2 issues after Wave 1 completes). Includes a formatted plan block in Phase 4."
+    },
+    {
+      "text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+      "passed": true,
+      "evidence": "Phase 3 has a detailed table with per-issue mode assignments and multi-sentence reasoning. Summary: 3 full (architectural), 2 lite (standard features), 2 quick (small changes). Each includes specific complexity signals."
+    },
+    {
+      "text": "Includes a user confirmation checkpoint before executing",
+      "passed": true,
+      "evidence": "Phase 4 explicitly says 'Before executing anything, I would present the following plan and wait for confirmation' and lists specific adjustment options: 'Change a mode', 'Reorder or drop issues', 'Split an issue first', 'Run everything in a single wave', 'Confirm as-is'."
+    },
+    {
+      "text": "Describes monitoring strategy using acorn status",
+      "passed": true,
+      "evidence": "Phase 6 shows 'acorn status replay' as primary monitoring, plus per-issue filesystem checks (ls recon/, ls plans/SPEC.md), expected completion order by mode, formatted progress reports, and failure handling with recovery commands."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 192.9,
+    "total_duration_seconds": 192.9
+  },
+  "claims": [
+    {
+      "claim": "Created 7 hypothetical issues to demonstrate the full pipeline",
+      "type": "process",
+      "verified": true,
+      "evidence": "Output includes a table of 7 hypothetical issues with realistic complexity signals"
+    },
+    {
+      "claim": "Identified issue #24 as a splitting candidate",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Concerns section specifically calls out '#24 is large -- consider splitting with acorn issue split replay 24'"
+    },
+    {
+      "claim": "For spec-only, all issues could technically run in parallel",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Correctly notes this nuance in Step 2d: 'since this is spec-only, all 7 issues could technically run in parallel (recon reads current codebase)' but recommends keeping waves for plan referencing"
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "reason": "All assertions also pass for the baseline (without_skill). The assertions don't capture the qualitative difference -- the with_skill version creates concrete hypothetical issues and works through the full example, while the baseline is more template-like. Consider adding an assertion about demonstrating the workflow with concrete examples."
+      },
+      {
+        "assertion": "Checks for existing specs in progress before processing",
+        "reason": "Both with-skill and without-skill check acorn list. This is already documented in CLAUDE.md's acorn reference, so it doesn't discriminate whether the skill adds value."
+      }
+    ],
+    "overall": "Assertions are solid but non-discriminating -- the baseline also passes all 7 due to comprehensive acorn docs in CLAUDE.md. Need assertions that capture the unique value the skill adds (e.g., concrete examples, nuanced spec-only vs spec+implement reasoning, splitting recommendations)."
+  }
+}

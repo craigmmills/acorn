@@ -1,0 +1,14 @@
+{
+  "eval_id": 1,
+  "eval_name": "vague-one-liner",
+  "prompt": "replay needs a way to share stuff with other people",
+  "assertions": [
+    {"text": "Draws out specifics from the vague input (asks questions OR makes explicit assumptions)"},
+    {"text": "Produces a Job Story in 'When [situation], I want to [action], so I can [outcome]' format with specific details"},
+    {"text": "Produces a Promise that is testable and concrete, not vague"},
+    {"text": "Produces Acceptance Criteria that are independently verifiable with checkbox format"},
+    {"text": "Includes Constraints section identifying what should not change"},
+    {"text": "Presents the complete draft for user confirmation before creating"},
+    {"text": "Shows the acorn issue create command that would be run"}
+  ]
+}

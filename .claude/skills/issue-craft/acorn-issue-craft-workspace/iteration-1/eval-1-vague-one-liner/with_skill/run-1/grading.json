@@ -1,0 +1,48 @@
+{
+  "eval_id": 1,
+  "eval_name": "vague-one-liner",
+  "configuration": "with_skill",
+  "expectations": [
+    {
+      "text": "Draws out specifics from the vague input (asks questions OR makes explicit assumptions)",
+      "passed": true,
+      "evidence": "Asked 3 targeted questions (what are people sharing, who are they sharing with, what's the pain right now) rather than interrogating with 20 questions. Then made 4 explicit assumptions and presented a draft with 'correct me where I'm wrong' framing."
+    },
+    {
+      "text": "Produces a Job Story in 'When [situation], I want to [action], so I can [outcome]' format with specific details",
+      "passed": true,
+      "evidence": "Job Story: 'When I'm looking at a chart setup or analysis in replay that I want to discuss with someone, I want to generate a shareable link that captures my current view, so I can send it to another person and they can see exactly what I'm seeing without me having to screenshot and lose interactivity.'"
+    },
+    {
+      "text": "Produces a Promise that is testable and concrete, not vague",
+      "passed": true,
+      "evidence": "Promise specifies: 'any user can generate a unique URL for their current chart view. Recipients who open the link see a read-only version of that exact chart state -- same symbols, timeframe, indicators, and annotations. The link works whether or not the recipient has a replay account.' All three clauses are testable."
+    },
+    {
+      "text": "Produces Acceptance Criteria that are independently verifiable with checkbox format",
+      "passed": true,
+      "evidence": "7 acceptance criteria in checkbox format, each independently verifiable: share button generates URL, URL encodes chart state, read-only rendering, accessible without auth, valid 30 days, no private data, copy-to-clipboard button."
+    },
+    {
+      "text": "Includes Constraints section identifying what should not change",
+      "passed": true,
+      "evidence": "5 constraints: read-only only, no exposure of account details, no real-time collaboration, point-in-time snapshots, no account required to view."
+    },
+    {
+      "text": "Presents the complete draft for user confirmation before creating",
+      "passed": true,
+      "evidence": "Step 4 explicitly presents draft and asks: 'Does this capture what you want?' with 3 targeted follow-up questions and a refinement paths table showing how the issue would evolve based on different user responses."
+    },
+    {
+      "text": "Shows the acorn issue create command that would be run",
+      "passed": true,
+      "evidence": "Step 5 shows full command: acorn issue create replay \"Add shareable links for chart views\" --label ready-for-spec --body \"$(cat <<'EOF'...EOF)\" with complete issue body."
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  }
+}

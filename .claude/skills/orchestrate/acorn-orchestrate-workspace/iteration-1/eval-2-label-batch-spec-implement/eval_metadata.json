@@ -1,0 +1,15 @@
+{
+  "eval_id": 2,
+  "eval_name": "label-batch-spec-implement",
+  "prompt": "Spec and implement all the issues labeled ready-for-spec in candles. Order them by dependencies — I don't want recon seeing stale code. Kick off implementations after specs are done.",
+  "assertions": [
+    {"text": "Uses gh issue list with label filter to discover issues"},
+    {"text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)"},
+    {"text": "Presents issues in wave-based execution plan with parallel grouping"},
+    {"text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity"},
+    {"text": "Includes a user confirmation checkpoint before executing"},
+    {"text": "Describes monitoring strategy using acorn status"},
+    {"text": "Includes implementation handoff plan with worktree creation in wave order"},
+    {"text": "Addresses merging between waves so agents see updated codebase"}
+  ]
+}

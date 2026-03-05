@@ -1,0 +1,15 @@
+{
+  "eval_id": 3,
+  "eval_name": "full-automation",
+  "configuration": "without_skill",
+  "summary": {"pass_rate": 1.0, "passed": 7, "failed": 0, "total": 7},
+  "expectations": [
+    {"text": "Performs a structured review before proceeding to handoff", "passed": true, "evidence": "Phases 2-3 cover red team review, evaluation scores, SPEC.md review, and a 10-point assessment checklist before Phase 4 approval."},
+    {"text": "Checks red team findings (appropriate for full mode spec)", "passed": true, "evidence": "Dedicated Phase 2 reads all 4 red team reports with findings table (Security, Scale, Reliability, Integration). Phase 3.2 confirms all findings addressed in final spec."},
+    {"text": "Recognizes end-to-end intent and proceeds to full automation without asking", "passed": true, "evidence": "Proceeds through all 6 phases (Orientation → Red Team → SPEC Review → Approve → Worktree+Agent → Monitoring) without pausing for confirmation."},
+    {"text": "Shows the acorn approve command", "passed": true, "evidence": "Phase 4: 'acorn approve replay add-notification-infrastructure'"},
+    {"text": "Shows worktree creation with the specified branch name (add-notification-infrastructure)", "passed": true, "evidence": "Phase 5.1: 'dev wt replay add-notification-infrastructure'"},
+    {"text": "Shows agent launch command (dev replay/add-notification-infrastructure/pi)", "passed": true, "evidence": "Phase 5.2: 'dev replay/add-notification-infrastructure/pi'"},
+    {"text": "Sends the spec path to the implementation agent with clear instructions", "passed": true, "evidence": "Phase 5.3 sends implementation prompt via tmux send-keys with spec path (~/Projects/replay/main/.specs/add-notification-infrastructure/plans/SPEC.md) and issue reference (#15)."}
+  ]
+}

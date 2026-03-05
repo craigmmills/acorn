@@ -1,0 +1,15 @@
+{
+  "eval_id": 3,
+  "eval_name": "full-automation",
+  "configuration": "with_skill",
+  "summary": {"pass_rate": 1.0, "passed": 7, "failed": 0, "total": 7},
+  "expectations": [
+    {"text": "Performs a structured review before proceeding to handoff", "passed": true, "evidence": "Full structured review in Step 2 with completeness (checkboxes), feasibility, and alignment sections before proceeding to Step 4 approval and Step 5 handoff."},
+    {"text": "Checks red team findings (appropriate for full mode spec)", "passed": true, "evidence": "Alignment section explicitly checks: '3 critical findings across the 4 red team reports. 2 addressed directly in the final spec (dead-letter queue, idempotency keys). 1 deferred with justification (payload size limits).'"},
+    {"text": "Recognizes end-to-end intent and proceeds to full automation without asking", "passed": true, "evidence": "Opens review noting 'the user's request implied implementation follows speccing.' After approval, proceeds directly: 'Since you asked for end-to-end, I'm proceeding directly to implementation setup.' No pause for confirmation."},
+    {"text": "Shows the acorn approve command", "passed": true, "evidence": "Shows: 'acorn approve replay add-notification-infrastructure'"},
+    {"text": "Shows worktree creation with the specified branch name (add-notification-infrastructure)", "passed": true, "evidence": "Shows: 'dev wt replay add-notification-infrastructure' creating ~/Projects/replay/add-notification-infrastructure/"},
+    {"text": "Shows agent launch command (dev replay/add-notification-infrastructure/pi)", "passed": true, "evidence": "Shows: 'dev replay/add-notification-infrastructure/pi'"},
+    {"text": "Sends the spec path to the implementation agent with clear instructions", "passed": true, "evidence": "Full agent prompt includes spec path (~/Projects/replay/main/.specs/add-notification-infrastructure/plans/SPEC.md) plus two review notes (SSE connection lifecycle, delivery latency metric)."}
+  ]
+}

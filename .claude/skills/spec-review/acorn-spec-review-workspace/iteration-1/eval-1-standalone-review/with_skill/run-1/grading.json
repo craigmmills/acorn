@@ -1,0 +1,15 @@
+{
+  "eval_id": 1,
+  "eval_name": "standalone-review",
+  "configuration": "with_skill",
+  "summary": {"pass_rate": 1.0, "passed": 7, "failed": 0, "total": 7},
+  "expectations": [
+    {"text": "Identifies what files to read (SPEC.md, PROMPT.md, meta.json, recon files)", "passed": true, "evidence": "Step 1 lists all files: SPEC.md, PROMPT.md, meta.json, recon/architecture.md, recon/relevant_code.md, recon/conventions.md, plus the validation.md (lite mode artifact). Also mentions fetching the original GitHub issue."},
+    {"text": "Evaluates completeness (architecture, data model, API contracts, edge cases, testing)", "passed": true, "evidence": "Detailed completeness review covering all 5 sub-areas with plausible findings. Found 2 gaps: resolution endpoint response shape underspecified, link-revocation-during-viewing not addressed."},
+    {"text": "Evaluates feasibility (technical risks, scope proportionality, dependencies)", "passed": true, "evidence": "Feasibility section covers token generation (crypto.randomBytes — no new deps), scope proportionality (no gold-plating), migration compatibility, and Redis caching for the resolution endpoint."},
+    {"text": "Evaluates alignment with original issue (Job Story match, Promise fulfillment, constraint respect)", "passed": true, "evidence": "Alignment section explicitly checks Job Story match, Promise fulfillment (unauthenticated access for public links), Constraint respect (no auth system changes), and Validation report findings."},
+    {"text": "Provides a structured review with clear verdict (ready/needs work)", "passed": true, "evidence": "Uses the exact format from the skill: 'Status: Ready (with minor notes)' with checkboxes for completeness, prose for feasibility/alignment, and specific action items."},
+    {"text": "Lists specific action items if gaps are found", "passed": true, "evidence": "Two specific action items: (1) Clarify resolution endpoint response shape, (2) Link revocation during active viewing behavior."},
+    {"text": "Does NOT proceed to implementation (user explicitly said don't implement)", "passed": true, "evidence": "Step 4 explicitly states: 'Since the user explicitly said don't implement anything yet, I would NOT proceed to Step 5.' Provides the acorn approve command for when they're ready but does not execute it."}
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "eval_id": 2,
+  "eval_name": "partial-idea",
+  "configuration": "with_skill",
+  "expectations": [
+    {
+      "text": "Produces a Job Story that frames the problem from the affected user's perspective",
+      "passed": true,
+      "evidence": "Job Story frames from the affected users' perspective: 'When our API is under heavy load from a few clients making thousands of requests per minute, I want the system to automatically throttle excessive usage per client based on their subscription tier, so that service quality remains consistent for all users and no single client can degrade the experience for others.'"
+    },
+    {
+      "text": "Produces a Promise with specific, measurable guarantees (e.g., request limits, response times)",
+      "passed": true,
+      "evidence": "Promise includes specific guarantees: 'HTTP 429 responses with a Retry-After header', 'Free-tier clients are limited to a lower request ceiling than paid-tier clients', 'no change in API behavior or latency' for compliant clients, 'Rate limit state is tracked in Redis and survives application restarts.'"
+    },
+    {
+      "text": "Adds Acceptance Criteria the user didn't explicitly mention (edge cases like what happens when limit is hit, rate limit headers, etc.)",
+      "passed": true,
+      "evidence": "Added beyond user's input: fail-open if Redis unavailable, standard rate limit headers (X-RateLimit-Limit/Remaining/Reset), no more than 5ms latency overhead, configurable without code deployment, logging with client identifier, application restart resilience. User only mentioned Redis, tiers, and the core problem."
+    },
+    {
+      "text": "Treats Redis mention as context/constraint rather than prescribing the solution",
+      "passed": true,
+      "evidence": "Redis listed as Constraint ('Must use the existing Redis instance for rate limit counters') and in Context ('Redis is already running in the stack'). The Job Story and Promise describe the problem/outcome without mentioning Redis. Algorithm choice left to spec agent."
+    },
+    {
+      "text": "Addresses the tier-based limits (free vs paid) in the acceptance criteria",
+      "passed": true,
+      "evidence": "AC #5: 'Free-tier and paid-tier clients have different rate limit ceilings (configurable, not hardcoded)'. Also addressed in the Promise."
+    },
+    {
+      "text": "Presents the complete draft for user confirmation",
+      "passed": true,
+      "evidence": "Step 4 presents the draft and asks 4 specific questions: assumed auth system exists, proposed fail-open behavior, left numbers configurable, included rate limit headers. Asks 'Anything to add or change?'"
+    },
+    {
+      "text": "Shows the acorn issue create command with --label ready-for-spec",
+      "passed": true,
+      "evidence": "Shows: acorn issue create candles \"Add Redis-backed API rate limiting with tiered limits\" --label ready-for-spec --body \"...\" with full issue body."
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  }
+}

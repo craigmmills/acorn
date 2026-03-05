@@ -1,0 +1,15 @@
+{
+  "eval_id": 2,
+  "eval_name": "guided-handoff",
+  "configuration": "without_skill",
+  "summary": {"pass_rate": 0.857142857, "passed": 6, "failed": 1, "total": 7},
+  "expectations": [
+    {"text": "Performs a structured review before discussing implementation", "passed": true, "evidence": "Steps 2-3 cover reading the spec and review assessment, followed by Steps 4-5 for approval and implementation handoff."},
+    {"text": "Calibrates review expectations to quick mode (doesn't penalize for missing red team analysis)", "passed": true, "evidence": "Notes 'Quick mode limitations' — 'A full-mode spec would have had 4 red team agents... For rate limiting, the quick spec is likely sufficient since this is a well-understood pattern.'"},
+    {"text": "After review, shows the user the handoff commands (acorn approve, dev wt, dev pi)", "passed": true, "evidence": "Shows all three: 'acorn approve candles rate-limiting', 'dev wt candles rate-limiting', 'dev candles/rate-limiting/pi' with detailed explanations."},
+    {"text": "Includes the spec path so the implementer knows where to find it", "passed": true, "evidence": "Agent prompt includes: 'Read the implementation spec at ~/Projects/candles/main/.specs/rate-limiting/plans/SPEC.md'"},
+    {"text": "Lets the user control the handoff pace — doesn't auto-run commands", "passed": true, "evidence": "Ends with: 'Would you like me to proceed with the approval step, or do you want to address any of the review items I flagged first?'"},
+    {"text": "Includes review notes or implementation guidance for the agent", "passed": false, "evidence": "Review flags 4 items (Redis key TTL, API key header name, rate limit bypass, quick mode limitations) in Step 3, but the agent prompt in Step 5c is generic ('implement the rate limiting feature... Work incrementally') and does NOT pass these review notes to the agent as implementation guidance."},
+    {"text": "Mentions how to check agent progress (dev pi-status)", "passed": true, "evidence": "Shows 'dev pi-status candles_rate-limiting --messages 1' and 'dev queue-status candles_rate-limiting -m' under monitoring section."}
+  ]
+}

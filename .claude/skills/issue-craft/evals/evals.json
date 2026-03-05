@@ -1,0 +1,50 @@
+{
+  "skill_name": "acorn-issue-craft",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "replay needs a way to share stuff with other people",
+      "expected_output": "Should ask clarifying questions or make assumptions to fill gaps, then produce a well-structured JTBD issue with specific Job Story, testable Promise, concrete Acceptance Criteria. Should not just echo the vague input back.",
+      "files": [],
+      "expectations": [
+        "Draws out specifics from the vague input (asks questions OR makes explicit assumptions)",
+        "Produces a Job Story in 'When [situation], I want to [action], so I can [outcome]' format with specific details",
+        "Produces a Promise that is testable and concrete, not vague",
+        "Produces Acceptance Criteria that are independently verifiable with checkbox format",
+        "Includes Constraints section identifying what should not change",
+        "Presents the complete draft for user confirmation before creating",
+        "Shows the acorn issue create command that would be run"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I want to add an API rate limiting system to candles. We're getting hammered by some clients making thousands of requests per minute and it's affecting other users. Should probably use Redis for the counters since we already have it running. Need different limits for free vs paid tiers.",
+      "expected_output": "Should organize the user's input into the JTBD template, adding edge cases and acceptance criteria the user didn't mention. Should note Redis as a constraint/context rather than prescribing it as the solution.",
+      "files": [],
+      "expectations": [
+        "Produces a Job Story that frames the problem from the affected user's perspective",
+        "Produces a Promise with specific, measurable guarantees (e.g., request limits, response times)",
+        "Adds Acceptance Criteria the user didn't explicitly mention (edge cases like what happens when limit is hit, rate limit headers, etc.)",
+        "Treats Redis mention as context/constraint rather than prescribing the solution",
+        "Addresses the tier-based limits (free vs paid) in the acceptance criteria",
+        "Presents the complete draft for user confirmation",
+        "Shows the acorn issue create command with --label ready-for-spec"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "We need a full notification system for replay. Users should get notified when a replay they're watching finishes processing, when someone shares a replay with them, when there are comments on their replays, and they should be able to configure which notifications they get via email vs in-app. Also need an admin panel to manage notification templates.",
+      "expected_output": "Should identify this as multiple issues and propose decomposition. Should present 2-4 separate issues with clear boundaries and dependency chain, each with full JTBD structure.",
+      "files": [],
+      "expectations": [
+        "Identifies the request as too large for a single issue and proposes splitting",
+        "Decomposes into 2-4 separate issues with clear boundaries",
+        "Each decomposed issue has its own Job Story, Promise, and Acceptance Criteria",
+        "Shows dependency relationships between the decomposed issues",
+        "Notification preferences/configuration is separated from the core notification infrastructure",
+        "Admin panel is a separate issue from user-facing notifications",
+        "Presents all issues for user confirmation before creating any"
+      ]
+    }
+  ]
+}

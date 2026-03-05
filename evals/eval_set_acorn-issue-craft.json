@@ -1,0 +1,22 @@
+[
+  {"query": "i have this idea for a feature — we need real-time notifications in the candles app when a trade hits a price alert. can you help me write it up as a github issue?", "should_trigger": true},
+  {"query": "we need to add dark mode to the replay dashboard. help me turn that into a proper issue with acceptance criteria and everything", "should_trigger": true},
+  {"query": "i want to create an issue for adding CSV export to the portfolio view. the user should be able to download their positions as a spreadsheet. help me flesh it out", "should_trigger": true},
+  {"query": "ok so my team keeps asking for a way to filter the activity feed by date range and event type. can you help me write that up as a JTBD issue for the candles repo?", "should_trigger": true},
+  {"query": "i've got a rough idea — we need better error handling when the websocket connection drops during live trading. the app just shows a blank screen right now. help me turn this into an issue", "should_trigger": true},
+  {"query": "wouldn't it be cool if we had a keyboard shortcut system in the replay app? like vim-style navigation. help me write up an issue for it", "should_trigger": true},
+  {"query": "the onboarding flow is terrible — new users have no idea what to do after signup. I want to add a guided tour. can you help me structure this as one or more issues?", "should_trigger": true},
+  {"query": "i need an issue for adding rate limiting to our public API. something about protecting the service when traffic spikes. help me think through the constraints and acceptance criteria", "should_trigger": true},
+  {"query": "create an issue for adding two-factor auth to the candles app. i haven't thought through all the details yet but it needs to support TOTP at minimum", "should_trigger": true},
+  {"query": "we should add a way for users to share their watchlists with other users. can you help me think through what that looks like and write it up?", "should_trigger": true},
+  {"query": "can you run acorn create replay 42 --lite? the issue is already written and ready to go", "should_trigger": false},
+  {"query": "review the spec for the add-notifications issue in candles — is it ready to implement?", "should_trigger": false},
+  {"query": "spec all the ready-for-spec issues in replay and figure out the right order based on dependencies", "should_trigger": false},
+  {"query": "the spec for issue 55 is done. approve it and kick off implementation in a worktree", "should_trigger": false},
+  {"query": "check acorn status for candles — how many specs are still running?", "should_trigger": false},
+  {"query": "i need to split issue 42 in replay — it's doing too many things. analyze it and suggest sub-issues", "should_trigger": false},
+  {"query": "help me understand how acorn's lite vs full pipeline modes differ in terms of agent count and stages", "should_trigger": false},
+  {"query": "the planning agent for the auth spec in replay seems stuck at stage 3. can you check the tmux session?", "should_trigger": false},
+  {"query": "merge the auth feature branch into main and clean up the worktree", "should_trigger": false},
+  {"query": "acorn issue clarify replay 42 — i wrote most of the issue content myself so swap the label", "should_trigger": false}
+]

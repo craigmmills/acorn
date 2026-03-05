@@ -1,0 +1,14 @@
+{
+  "eval_id": 1,
+  "eval_name": "standalone-review",
+  "prompt": "Can you review the spec for the shareable links feature in replay? It was generated with acorn in lite mode. The spec is at ~/Projects/replay/main/.specs/add-shareable-links/plans/SPEC.md and the original issue is #42. I just want to know if it's ready to approve — don't implement anything yet.",
+  "assertions": [
+    {"text": "Identifies what files to read (SPEC.md, PROMPT.md, meta.json, recon files)"},
+    {"text": "Evaluates completeness (architecture, data model, API contracts, edge cases, testing)"},
+    {"text": "Evaluates feasibility (technical risks, scope proportionality, dependencies)"},
+    {"text": "Evaluates alignment with original issue (Job Story match, Promise fulfillment, constraint respect)"},
+    {"text": "Provides a structured review with clear verdict (ready/needs work)"},
+    {"text": "Lists specific action items if gaps are found"},
+    {"text": "Does NOT proceed to implementation (user explicitly said don't implement)"}
+  ]
+}

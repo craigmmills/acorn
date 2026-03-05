@@ -1,0 +1,66 @@
+{
+  "expectations": [
+    {
+      "text": "Uses gh issue list with label filter to discover issues",
+      "passed": true,
+      "evidence": "Step 1 shows: 'gh issue list -R <owner>/candles -l \"ready-for-spec\" --state open --json number,title,body,labels,comments' plus git remote resolution."
+    },
+    {
+      "text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+      "passed": true,
+      "evidence": "Step 2 covers explicit scanning (keyword patterns) and implicit analysis (DB schema changes, new APIs, shared utilities, overlapping files). Includes cycle detection."
+    },
+    {
+      "text": "Presents issues in wave-based execution plan with parallel grouping",
+      "passed": true,
+      "evidence": "Step 2 shows a 3-wave example plan with reasoning for each grouping. Step 4 shows a formatted plan with wave structure."
+    },
+    {
+      "text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+      "passed": true,
+      "evidence": "Step 3 shows mode selection criteria table. Step 4 plan shows per-issue mode with reasoning (e.g., 'foundational data model, complex architectural decision' for full)."
+    },
+    {
+      "text": "Includes a user confirmation checkpoint before executing",
+      "passed": true,
+      "evidence": "Step 4 ends with 'I would wait for user confirmation before executing' with specific adjustment options (change mode, drop issue, reorder, split)."
+    },
+    {
+      "text": "Describes monitoring strategy using acorn status",
+      "passed": true,
+      "evidence": "Step 6 shows 'acorn status candles', granular file checks, progress reporting, failure handling, and a summary monitoring tools table."
+    },
+    {
+      "text": "Includes implementation handoff plan with worktree creation in wave order",
+      "passed": true,
+      "evidence": "Wave 1 Implementation Handoff section shows: acorn approve, dev wt candles, dev candles/<branch>/pi, sending SPEC.md path to agents, dev pi-status monitoring."
+    },
+    {
+      "text": "Addresses merging between waves so agents see updated codebase",
+      "passed": true,
+      "evidence": "Wave 1: Merge Before Wave 2 section explicitly covers git merge, COMPOSE_PROJECT_NAME docker compose down, dev cleanup. States 'This is critical for the user's requirement that recon doesn't see stale code.'"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 131.3,
+    "total_duration_seconds": 131.3
+  },
+  "claims": [
+    {
+      "claim": "Docker compose cleanup included between waves",
+      "type": "process",
+      "verified": true,
+      "evidence": "Shows COMPOSE_PROJECT_NAME=candles-<branch> docker compose down -v before dev cleanup"
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "All assertions pass with strong evidence. The implementation handoff and merge-between-waves sections are particularly well-structured."
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "eval_id": 3,
+  "eval_name": "decomposition",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "Identifies the request as too large for a single issue and proposes splitting",
+      "passed": true,
+      "evidence": "Analysis section identifies 'at least five distinct functional areas' and explicitly states 'Cramming all of this into a single issue would produce a sprawling spec that tries to design everything at once.' Proposes decomposition into 4 issues."
+    },
+    {
+      "text": "Decomposes into 2-4 separate issues with clear boundaries",
+      "passed": true,
+      "evidence": "Decomposed into 4 issues with clear boundaries: (1) Core infrastructure, (2) In-app notification center & triggers, (3) User preferences & email delivery, (4) Admin template management. Each has distinct subsystem scope."
+    },
+    {
+      "text": "Each decomposed issue has its own Job Story, Promise, and Acceptance Criteria",
+      "passed": true,
+      "evidence": "All 4 issues have complete Job Story, Promise, Constraints, and Acceptance Criteria sections. Each is self-contained with 9-11 acceptance criteria per issue."
+    },
+    {
+      "text": "Shows dependency relationships between the decomposed issues",
+      "passed": true,
+      "evidence": "Includes dependency decomposition table, ASCII dependency graph, recommended implementation order with parallelization notes (Issues 2 and 4 can run in parallel), and spec pipeline mode recommendations per issue."
+    },
+    {
+      "text": "Notification preferences/configuration is separated from the core notification infrastructure",
+      "passed": true,
+      "evidence": "Issue 3 covers user preferences (combined with email delivery) as a separate issue from Issue 1 (core infrastructure). Preferences are in a distinct issue with its own scope, dependencies, and acceptance criteria."
+    },
+    {
+      "text": "Admin panel is a separate issue from user-facing notifications",
+      "passed": true,
+      "evidence": "Issue 4 (Admin panel for managing notification templates) is fully separate from Issues 2 and 3 (user-facing). Can be built in parallel with Issues 2 and 3."
+    },
+    {
+      "text": "Presents all issues for user confirmation before creating any",
+      "passed": true,
+      "evidence": "Commands section labeled with full commands, and a 'Questions I Would Ask Before Creating These Issues' section with 5 confirmation questions. Notes 'Once the user confirms the decomposition and addresses these questions, the four commands would be run.'"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  }
+}

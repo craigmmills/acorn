@@ -1,0 +1,67 @@
+{
+  "expectations": [
+    {
+      "text": "Fetches specific issues by number using gh issue view",
+      "passed": true,
+      "evidence": "Step 1 shows three parallel commands: 'gh issue view 12 -R craigmills/replay', 'gh issue view 15 -R craigmills/replay', 'gh issue view 23 -R craigmills/replay' with --json fields."
+    },
+    {
+      "text": "Analyzes dependencies between the 3 issues",
+      "passed": true,
+      "evidence": "Step 2 analyzes each issue's scope and concludes: '#12 (auth) is foundational. #23 (API endpoint) likely depends on #12 if the endpoint is authenticated. #15 (config) is independent.' Includes dependency graph."
+    },
+    {
+      "text": "Assigns full mode to issue 12 (auth overhaul - architecturally complex)",
+      "passed": true,
+      "evidence": "Step 3 assigns full with reasoning: 'big auth overhaul = architectural, security-critical, multi-subsystem. Auth changes are architecturally significant, touching multiple subsystems. Security implications are non-trivial.'"
+    },
+    {
+      "text": "Assigns quick mode to issue 15 (config option - small and well-defined)",
+      "passed": true,
+      "evidence": "Step 3 assigns quick with reasoning: 'small, well-defined change. Likely touches 1-3 files. Spending 14 Opus agents on a config change would be wasteful.'"
+    },
+    {
+      "text": "Assigns lite mode to issue 23 (new API endpoint - standard feature)",
+      "passed": true,
+      "evidence": "Step 3 assigns lite with reasoning: 'normal feature work -- clear scope, non-trivial. Touches 3-8 files. Lite mode is the sweet spot here.'"
+    },
+    {
+      "text": "Presents wave-ordered execution plan",
+      "passed": true,
+      "evidence": "Step 4 shows: Wave 1 (#12 full + #15 quick, parallel) and Wave 2 (#23 lite, after wave 1). Includes note that #23 can move to Wave 1 if it doesn't need auth."
+    },
+    {
+      "text": "Includes a user confirmation checkpoint before executing",
+      "passed": true,
+      "evidence": "Step 4 explicitly shows 'I would then wait for the user to confirm or adjust before proceeding' with specific options (change mode, reorder, drop, split)."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 103.3,
+    "total_duration_seconds": 103.3
+  },
+  "claims": [
+    {
+      "claim": "Suggested splitting issue #12 into independently shippable pieces",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Concerns section suggests 'acorn issue split replay 12' with specific decomposition: 'migrate session management + add new permission model + update route guards'"
+    },
+    {
+      "claim": "#23 dependency on #12 is conditional, not absolute",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Correctly notes: 'If #23 does not require authentication, it can move to Wave 1 for faster parallel execution.' This nuanced reasoning shows understanding that the dependency depends on issue content."
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "Strong output. The conditional dependency reasoning and splitting suggestion go beyond what the assertions check."
+  }
+}

@@ -1,0 +1,388 @@
+{
+  "metadata": {
+    "skill_name": "acorn-spec-review",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-03-05T08:25:33Z",
+    "evals_run": [
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 120.5,
+        "tokens": 22062,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Identifies what files to read (SPEC.md, PROMPT.md, meta.json, recon files)",
+          "passed": true,
+          "evidence": "Step 1 lists all files: SPEC.md, PROMPT.md, meta.json, recon/architecture.md, recon/relevant_code.md, recon/conventions.md, plus the validation.md (lite mode artifact). Also mentions fetching the original GitHub issue."
+        },
+        {
+          "text": "Evaluates completeness (architecture, data model, API contracts, edge cases, testing)",
+          "passed": true,
+          "evidence": "Detailed completeness review covering all 5 sub-areas with plausible findings. Found 2 gaps: resolution endpoint response shape underspecified, link-revocation-during-viewing not addressed."
+        },
+        {
+          "text": "Evaluates feasibility (technical risks, scope proportionality, dependencies)",
+          "passed": true,
+          "evidence": "Feasibility section covers token generation (crypto.randomBytes \u2014 no new deps), scope proportionality (no gold-plating), migration compatibility, and Redis caching for the resolution endpoint."
+        },
+        {
+          "text": "Evaluates alignment with original issue (Job Story match, Promise fulfillment, constraint respect)",
+          "passed": true,
+          "evidence": "Alignment section explicitly checks Job Story match, Promise fulfillment (unauthenticated access for public links), Constraint respect (no auth system changes), and Validation report findings."
+        },
+        {
+          "text": "Provides a structured review with clear verdict (ready/needs work)",
+          "passed": true,
+          "evidence": "Uses the exact format from the skill: 'Status: Ready (with minor notes)' with checkboxes for completeness, prose for feasibility/alignment, and specific action items."
+        },
+        {
+          "text": "Lists specific action items if gaps are found",
+          "passed": true,
+          "evidence": "Two specific action items: (1) Clarify resolution endpoint response shape, (2) Link revocation during active viewing behavior."
+        },
+        {
+          "text": "Does NOT proceed to implementation (user explicitly said don't implement)",
+          "passed": true,
+          "evidence": "Step 4 explicitly states: 'Since the user explicitly said don't implement anything yet, I would NOT proceed to Step 5.' Provides the acorn approve command for when they're ready but does not execute it."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 82.3,
+        "tokens": 20920,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Performs a structured review before discussing implementation",
+          "passed": true,
+          "evidence": "Full structured review in Step 2 with completeness/feasibility/alignment sections and checkboxes, followed by handoff in Step 4."
+        },
+        {
+          "text": "Calibrates review expectations to quick mode (doesn't penalize for missing red team analysis)",
+          "passed": true,
+          "evidence": "Explicitly states: 'I would not penalize the spec for lacking multi-perspective drafts or red team analysis, since quick mode is designed for simpler issues.' Notes red team absence as 'informational, not a deficiency.'"
+        },
+        {
+          "text": "After review, shows the user the handoff commands (acorn approve, dev wt, dev pi)",
+          "passed": true,
+          "evidence": "Shows all three commands: 'acorn approve candles rate-limiting', 'dev wt candles rate-limiting', 'dev candles/rate-limiting/pi' with explanations of each."
+        },
+        {
+          "text": "Includes the spec path so the implementer knows where to find it",
+          "passed": true,
+          "evidence": "Agent instruction includes: 'Read the implementation spec at ~/Projects/candles/main/.specs/rate-limiting/plans/SPEC.md'"
+        },
+        {
+          "text": "Lets the user control the handoff pace \u2014 doesn't auto-run commands",
+          "passed": true,
+          "evidence": "Ends with 'Want me to run any of these steps?' \u2014 presents commands for the user to drive, doesn't auto-execute."
+        },
+        {
+          "text": "Includes review notes or implementation guidance for the agent",
+          "passed": true,
+          "evidence": "Three specific implementation notes bridging review gaps: (1) use existing error envelope pattern for 429s, (2) add concurrent request tests and Redis failover tests, (3) verify Redis client/pool accessibility from middleware."
+        },
+        {
+          "text": "Mentions how to check agent progress (dev pi-status)",
+          "passed": true,
+          "evidence": "Shows: 'dev pi-status candles/rate-limiting --messages 1' under the Monitor progress section."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 100.9,
+        "tokens": 21343,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Performs a structured review before proceeding to handoff",
+          "passed": true,
+          "evidence": "Full structured review in Step 2 with completeness (checkboxes), feasibility, and alignment sections before proceeding to Step 4 approval and Step 5 handoff."
+        },
+        {
+          "text": "Checks red team findings (appropriate for full mode spec)",
+          "passed": true,
+          "evidence": "Alignment section explicitly checks: '3 critical findings across the 4 red team reports. 2 addressed directly in the final spec (dead-letter queue, idempotency keys). 1 deferred with justification (payload size limits).'"
+        },
+        {
+          "text": "Recognizes end-to-end intent and proceeds to full automation without asking",
+          "passed": true,
+          "evidence": "Opens review noting 'the user's request implied implementation follows speccing.' After approval, proceeds directly: 'Since you asked for end-to-end, I'm proceeding directly to implementation setup.' No pause for confirmation."
+        },
+        {
+          "text": "Shows the acorn approve command",
+          "passed": true,
+          "evidence": "Shows: 'acorn approve replay add-notification-infrastructure'"
+        },
+        {
+          "text": "Shows worktree creation with the specified branch name (add-notification-infrastructure)",
+          "passed": true,
+          "evidence": "Shows: 'dev wt replay add-notification-infrastructure' creating ~/Projects/replay/add-notification-infrastructure/"
+        },
+        {
+          "text": "Shows agent launch command (dev replay/add-notification-infrastructure/pi)",
+          "passed": true,
+          "evidence": "Shows: 'dev replay/add-notification-infrastructure/pi'"
+        },
+        {
+          "text": "Sends the spec path to the implementation agent with clear instructions",
+          "passed": true,
+          "evidence": "Full agent prompt includes spec path (~/Projects/replay/main/.specs/add-notification-infrastructure/plans/SPEC.md) plus two review notes (SSE connection lifecycle, delivery latency metric)."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 101.1,
+        "tokens": 18257,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Identifies what files to read (SPEC.md, PROMPT.md, meta.json, recon files)",
+          "passed": true,
+          "evidence": "Step 1 lists all files: SPEC.md, PROMPT.md, meta.json, recon/architecture.md, relevant_code.md, conventions.md, plus lite-mode plan artifacts (draft_plan_1.md, validation.md)."
+        },
+        {
+          "text": "Evaluates completeness (architecture, data model, API contracts, edge cases, testing)",
+          "passed": true,
+          "evidence": "Covers core link generation, database schema, API endpoints, frontend integration, access control, link expiration, and testing. Less structured than with-skill but touches all areas."
+        },
+        {
+          "text": "Evaluates feasibility (technical risks, scope proportionality, dependencies)",
+          "passed": true,
+          "evidence": "Addresses token entropy, rate limiting/brute-force, information leakage, scope creep checks (analytics, OG tags, collaborative viewing), and data exposure risks."
+        },
+        {
+          "text": "Evaluates alignment with original issue (Job Story match, Promise fulfillment, constraint respect)",
+          "passed": true,
+          "evidence": "Step 3 describes cross-referencing: 'Requirement coverage \u2014 Does every acceptance criterion from issue #42 have a corresponding implementation plan in the spec?' Also checks scope creep and architecture fit."
+        },
+        {
+          "text": "Provides a structured review with clear verdict (ready/needs work)",
+          "passed": true,
+          "evidence": "Clear verdict: 'Not yet ready to approve' with specific rationale about security surface area and lite mode's lack of red team review."
+        },
+        {
+          "text": "Lists specific action items if gaps are found",
+          "passed": true,
+          "evidence": "Three specific concerns (security coverage, access control boundaries, expiration lifecycle) plus 4 recommended next steps including re-running in full mode."
+        },
+        {
+          "text": "Does NOT proceed to implementation (user explicitly said don't implement)",
+          "passed": true,
+          "evidence": "Does not mention implementation or handoff at all. Stops at review verdict and recommended next steps."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.857142857,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 79.4,
+        "tokens": 17436,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Performs a structured review before discussing implementation",
+          "passed": true,
+          "evidence": "Steps 2-3 cover reading the spec and review assessment, followed by Steps 4-5 for approval and implementation handoff."
+        },
+        {
+          "text": "Calibrates review expectations to quick mode (doesn't penalize for missing red team analysis)",
+          "passed": true,
+          "evidence": "Notes 'Quick mode limitations' \u2014 'A full-mode spec would have had 4 red team agents... For rate limiting, the quick spec is likely sufficient since this is a well-understood pattern.'"
+        },
+        {
+          "text": "After review, shows the user the handoff commands (acorn approve, dev wt, dev pi)",
+          "passed": true,
+          "evidence": "Shows all three: 'acorn approve candles rate-limiting', 'dev wt candles rate-limiting', 'dev candles/rate-limiting/pi' with detailed explanations."
+        },
+        {
+          "text": "Includes the spec path so the implementer knows where to find it",
+          "passed": true,
+          "evidence": "Agent prompt includes: 'Read the implementation spec at ~/Projects/candles/main/.specs/rate-limiting/plans/SPEC.md'"
+        },
+        {
+          "text": "Lets the user control the handoff pace \u2014 doesn't auto-run commands",
+          "passed": true,
+          "evidence": "Ends with: 'Would you like me to proceed with the approval step, or do you want to address any of the review items I flagged first?'"
+        },
+        {
+          "text": "Includes review notes or implementation guidance for the agent",
+          "passed": false,
+          "evidence": "Review flags 4 items (Redis key TTL, API key header name, rate limit bypass, quick mode limitations) in Step 3, but the agent prompt in Step 5c is generic ('implement the rate limiting feature... Work incrementally') and does NOT pass these review notes to the agent as implementation guidance."
+        },
+        {
+          "text": "Mentions how to check agent progress (dev pi-status)",
+          "passed": true,
+          "evidence": "Shows 'dev pi-status candles_rate-limiting --messages 1' and 'dev queue-status candles_rate-limiting -m' under monitoring section."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 103.7,
+        "tokens": 18890,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Performs a structured review before proceeding to handoff",
+          "passed": true,
+          "evidence": "Phases 2-3 cover red team review, evaluation scores, SPEC.md review, and a 10-point assessment checklist before Phase 4 approval."
+        },
+        {
+          "text": "Checks red team findings (appropriate for full mode spec)",
+          "passed": true,
+          "evidence": "Dedicated Phase 2 reads all 4 red team reports with findings table (Security, Scale, Reliability, Integration). Phase 3.2 confirms all findings addressed in final spec."
+        },
+        {
+          "text": "Recognizes end-to-end intent and proceeds to full automation without asking",
+          "passed": true,
+          "evidence": "Proceeds through all 6 phases (Orientation \u2192 Red Team \u2192 SPEC Review \u2192 Approve \u2192 Worktree+Agent \u2192 Monitoring) without pausing for confirmation."
+        },
+        {
+          "text": "Shows the acorn approve command",
+          "passed": true,
+          "evidence": "Phase 4: 'acorn approve replay add-notification-infrastructure'"
+        },
+        {
+          "text": "Shows worktree creation with the specified branch name (add-notification-infrastructure)",
+          "passed": true,
+          "evidence": "Phase 5.1: 'dev wt replay add-notification-infrastructure'"
+        },
+        {
+          "text": "Shows agent launch command (dev replay/add-notification-infrastructure/pi)",
+          "passed": true,
+          "evidence": "Phase 5.2: 'dev replay/add-notification-infrastructure/pi'"
+        },
+        {
+          "text": "Sends the spec path to the implementation agent with clear instructions",
+          "passed": true,
+          "evidence": "Phase 5.3 sends implementation prompt via tmux send-keys with spec path (~/Projects/replay/main/.specs/add-notification-infrastructure/plans/SPEC.md) and issue reference (#15)."
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 101.2333,
+        "stddev": 19.1022,
+        "min": 82.3,
+        "max": 120.5
+      },
+      "tokens": {
+        "mean": 21441.6667,
+        "stddev": 577.3581,
+        "min": 20920,
+        "max": 22062
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.9524,
+        "stddev": 0.0825,
+        "min": 0.8571,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 94.7333,
+        "stddev": 13.3425,
+        "min": 79.4,
+        "max": 103.7
+      },
+      "tokens": {
+        "mean": 18194.3333,
+        "stddev": 729.0229,
+        "min": 17436,
+        "max": 18890
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.05",
+      "time_seconds": "+6.5",
+      "tokens": "+3247"
+    }
+  },
+  "notes": [
+    "The skill's value shows most clearly in eval 2 (guided-handoff): without the skill, Claude performs a good review and shows handoff commands, but the implementation agent prompt is generic and doesn't carry forward the review findings. With the skill, review notes are explicitly bridged into the agent prompt as implementation guidance.",
+    "Evals 1 and 3 pass 100% in both configurations — Claude naturally handles standalone review and full automation well. The skill adds structure (checkbox format, mode-calibrated expectations) but both configurations meet the assertions.",
+    "Token overhead is ~18% (21.4k vs 18.2k mean) — the skill's structured review template adds context but the increase is modest. Time overhead is ~7% (101s vs 95s mean).",
+    "The single discriminating assertion ('Includes review notes or implementation guidance for the agent') is the strongest signal for the skill's value: it ensures review findings don't get lost in the handoff to the implementation agent."
+  ]
+}

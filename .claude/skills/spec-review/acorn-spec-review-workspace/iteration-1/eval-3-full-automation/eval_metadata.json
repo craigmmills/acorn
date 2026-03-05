@@ -1,0 +1,14 @@
+{
+  "eval_id": 3,
+  "eval_name": "full-automation",
+  "prompt": "I need you to handle issue #15 in replay end-to-end. The acorn spec is already generated (full mode) at .specs/add-notification-infrastructure/plans/SPEC.md. Review it and if it passes, approve it and spin up a worktree agent to implement it. The branch should be called add-notification-infrastructure.",
+  "assertions": [
+    {"text": "Performs a structured review before proceeding to handoff"},
+    {"text": "Checks red team findings (appropriate for full mode spec)"},
+    {"text": "Recognizes end-to-end intent and proceeds to full automation without asking"},
+    {"text": "Shows the acorn approve command"},
+    {"text": "Shows worktree creation with the specified branch name (add-notification-infrastructure)"},
+    {"text": "Shows agent launch command (dev replay/add-notification-infrastructure/pi)"},
+    {"text": "Sends the spec path to the implementation agent with clear instructions"}
+  ]
+}

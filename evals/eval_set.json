@@ -1,0 +1,82 @@
+[
+  {
+    "query": "ok so i've got like 8 issues in the replay repo all labeled ready-for-spec, can you spec them all? some of them depend on each other so order matters",
+    "should_trigger": true
+  },
+  {
+    "query": "spec all the ready-for-spec issues in candles and then kick off implementation for each one when the spec lands",
+    "should_trigger": true
+  },
+  {
+    "query": "i need to process issues 42, 45, 51, and 67 in the replay repo through acorn. 51 depends on 42 and 67 depends on both 45 and 51. figure out the right order and mode for each",
+    "should_trigger": true
+  },
+  {
+    "query": "run acorn on the backlog for candles — everything with the ready-for-spec label. use lite for the simple ones and full for the complex ones",
+    "should_trigger": true
+  },
+  {
+    "query": "hey can you look at the replay repo and figure out which issues are ready to be specced? then batch process them with the right pipeline mode for each",
+    "should_trigger": true
+  },
+  {
+    "query": "I tagged 5 issues as ready-for-spec in the replay repo yesterday. can you spec and implement all of them? the auth one should go first since everything else builds on it",
+    "should_trigger": true
+  },
+  {
+    "query": "we need to plan out the next sprint — there are about 6 issues labeled ready-for-spec across the candles repo. analyze their dependencies and run them through acorn in the right order",
+    "should_trigger": true
+  },
+  {
+    "query": "process the milestone 2.0 issues in replay through the spec pipeline, I think there are 4 or 5 of them",
+    "should_trigger": true
+  },
+  {
+    "query": "i've got issues 12 through 18 in candles that all need specs. some are trivial config changes and others are meaty features — pick the right acorn mode for each and run them",
+    "should_trigger": true
+  },
+  {
+    "query": "spec the ready-for-spec issues in replay. after all specs land, review them and then start implementation in dependency order",
+    "should_trigger": true
+  },
+  {
+    "query": "can you run acorn create replay 42? it's a pretty complex auth feature so use the full pipeline",
+    "should_trigger": false
+  },
+  {
+    "query": "review the spec for the add-websocket-streaming issue in candles — check if it covers all the acceptance criteria from the original issue",
+    "should_trigger": false
+  },
+  {
+    "query": "i want to create a github issue for adding dark mode to the candles dashboard. help me write it up with the JTBD template",
+    "should_trigger": false
+  },
+  {
+    "query": "check acorn status for replay and tell me which specs are done and which are still running",
+    "should_trigger": false
+  },
+  {
+    "query": "the spec for issue 42 in replay is done. can you approve it and set up a worktree to start implementing?",
+    "should_trigger": false
+  },
+  {
+    "query": "i need to split issue 88 in candles — it's trying to do too much. can you analyze it and suggest how to break it down?",
+    "should_trigger": false
+  },
+  {
+    "query": "help me understand the acorn spec pipeline — what's the difference between full, lite, and quick modes?",
+    "should_trigger": false
+  },
+  {
+    "query": "clean up the old spec sessions in replay that are dead — I think there are a few leftover from last week",
+    "should_trigger": false
+  },
+  {
+    "query": "the worktree agent working on the auth feature in replay seems stuck. can you check its status and see what's going on?",
+    "should_trigger": false
+  },
+  {
+    "query": "create a new issue in replay for adding rate limiting to the API. something like 'when the API gets hammered, I want requests to be throttled so the service stays up'",
+    "should_trigger": false
+  }
+]

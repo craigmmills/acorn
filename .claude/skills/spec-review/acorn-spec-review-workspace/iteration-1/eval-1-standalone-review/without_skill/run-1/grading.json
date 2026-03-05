@@ -1,0 +1,15 @@
+{
+  "eval_id": 1,
+  "eval_name": "standalone-review",
+  "configuration": "without_skill",
+  "summary": {"pass_rate": 1.0, "passed": 7, "failed": 0, "total": 7},
+  "expectations": [
+    {"text": "Identifies what files to read (SPEC.md, PROMPT.md, meta.json, recon files)", "passed": true, "evidence": "Step 1 lists all files: SPEC.md, PROMPT.md, meta.json, recon/architecture.md, relevant_code.md, conventions.md, plus lite-mode plan artifacts (draft_plan_1.md, validation.md)."},
+    {"text": "Evaluates completeness (architecture, data model, API contracts, edge cases, testing)", "passed": true, "evidence": "Covers core link generation, database schema, API endpoints, frontend integration, access control, link expiration, and testing. Less structured than with-skill but touches all areas."},
+    {"text": "Evaluates feasibility (technical risks, scope proportionality, dependencies)", "passed": true, "evidence": "Addresses token entropy, rate limiting/brute-force, information leakage, scope creep checks (analytics, OG tags, collaborative viewing), and data exposure risks."},
+    {"text": "Evaluates alignment with original issue (Job Story match, Promise fulfillment, constraint respect)", "passed": true, "evidence": "Step 3 describes cross-referencing: 'Requirement coverage — Does every acceptance criterion from issue #42 have a corresponding implementation plan in the spec?' Also checks scope creep and architecture fit."},
+    {"text": "Provides a structured review with clear verdict (ready/needs work)", "passed": true, "evidence": "Clear verdict: 'Not yet ready to approve' with specific rationale about security surface area and lite mode's lack of red team review."},
+    {"text": "Lists specific action items if gaps are found", "passed": true, "evidence": "Three specific concerns (security coverage, access control boundaries, expiration lifecycle) plus 4 recommended next steps including re-running in full mode."},
+    {"text": "Does NOT proceed to implementation (user explicitly said don't implement)", "passed": true, "evidence": "Does not mention implementation or handoff at all. Stops at review verdict and recommended next steps."}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "eval_id": 2,
+  "eval_name": "guided-handoff",
+  "prompt": "The acorn spec for rate limiting in candles is done (issue #18, quick mode). Can you review it and if it looks good, walk me through getting implementation started?",
+  "assertions": [
+    {"text": "Performs a structured review before discussing implementation"},
+    {"text": "Calibrates review expectations to quick mode (doesn't penalize for missing red team analysis)"},
+    {"text": "After review, shows the user the handoff commands (acorn approve, dev wt, dev pi)"},
+    {"text": "Includes the spec path so the implementer knows where to find it"},
+    {"text": "Lets the user control the handoff pace — doesn't auto-run commands"},
+    {"text": "Includes review notes or implementation guidance for the agent"},
+    {"text": "Mentions how to check agent progress (dev pi-status)"}
+  ]
+}

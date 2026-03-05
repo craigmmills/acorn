@@ -1,0 +1,388 @@
+{
+  "metadata": {
+    "skill_name": "acorn-issue-craft",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-03-05T08:10:06Z",
+    "evals_run": [
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 99.1,
+        "tokens": 20580,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Draws out specifics from the vague input (asks questions OR makes explicit assumptions)",
+          "passed": true,
+          "evidence": "Asked 3 targeted questions (what are people sharing, who are they sharing with, what's the pain right now) rather than interrogating with 20 questions. Then made 4 explicit assumptions and presented a draft with 'correct me where I'm wrong' framing."
+        },
+        {
+          "text": "Produces a Job Story in 'When [situation], I want to [action], so I can [outcome]' format with specific details",
+          "passed": true,
+          "evidence": "Job Story: 'When I'm looking at a chart setup or analysis in replay that I want to discuss with someone, I want to generate a shareable link that captures my current view, so I can send it to another person and they can see exactly what I'm seeing without me having to screenshot and lose interactivity.'"
+        },
+        {
+          "text": "Produces a Promise that is testable and concrete, not vague",
+          "passed": true,
+          "evidence": "Promise specifies: 'any user can generate a unique URL for their current chart view. Recipients who open the link see a read-only version of that exact chart state -- same symbols, timeframe, indicators, and annotations. The link works whether or not the recipient has a replay account.' All three clauses are testable."
+        },
+        {
+          "text": "Produces Acceptance Criteria that are independently verifiable with checkbox format",
+          "passed": true,
+          "evidence": "7 acceptance criteria in checkbox format, each independently verifiable: share button generates URL, URL encodes chart state, read-only rendering, accessible without auth, valid 30 days, no private data, copy-to-clipboard button."
+        },
+        {
+          "text": "Includes Constraints section identifying what should not change",
+          "passed": true,
+          "evidence": "5 constraints: read-only only, no exposure of account details, no real-time collaboration, point-in-time snapshots, no account required to view."
+        },
+        {
+          "text": "Presents the complete draft for user confirmation before creating",
+          "passed": true,
+          "evidence": "Step 4 explicitly presents draft and asks: 'Does this capture what you want?' with 3 targeted follow-up questions and a refinement paths table showing how the issue would evolve based on different user responses."
+        },
+        {
+          "text": "Shows the acorn issue create command that would be run",
+          "passed": true,
+          "evidence": "Step 5 shows full command: acorn issue create replay \"Add shareable links for chart views\" --label ready-for-spec --body \"$(cat <<'EOF'...EOF)\" with complete issue body."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 85.0,
+        "tokens": 20695,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Produces a Job Story that frames the problem from the affected user's perspective",
+          "passed": true,
+          "evidence": "Job Story frames from the affected users' perspective: 'When our API is under heavy load from a few clients making thousands of requests per minute, I want the system to automatically throttle excessive usage per client based on their subscription tier, so that service quality remains consistent for all users and no single client can degrade the experience for others.'"
+        },
+        {
+          "text": "Produces a Promise with specific, measurable guarantees (e.g., request limits, response times)",
+          "passed": true,
+          "evidence": "Promise includes specific guarantees: 'HTTP 429 responses with a Retry-After header', 'Free-tier clients are limited to a lower request ceiling than paid-tier clients', 'no change in API behavior or latency' for compliant clients, 'Rate limit state is tracked in Redis and survives application restarts.'"
+        },
+        {
+          "text": "Adds Acceptance Criteria the user didn't explicitly mention (edge cases like what happens when limit is hit, rate limit headers, etc.)",
+          "passed": true,
+          "evidence": "Added beyond user's input: fail-open if Redis unavailable, standard rate limit headers (X-RateLimit-Limit/Remaining/Reset), no more than 5ms latency overhead, configurable without code deployment, logging with client identifier, application restart resilience. User only mentioned Redis, tiers, and the core problem."
+        },
+        {
+          "text": "Treats Redis mention as context/constraint rather than prescribing the solution",
+          "passed": true,
+          "evidence": "Redis listed as Constraint ('Must use the existing Redis instance for rate limit counters') and in Context ('Redis is already running in the stack'). The Job Story and Promise describe the problem/outcome without mentioning Redis. Algorithm choice left to spec agent."
+        },
+        {
+          "text": "Addresses the tier-based limits (free vs paid) in the acceptance criteria",
+          "passed": true,
+          "evidence": "AC #5: 'Free-tier and paid-tier clients have different rate limit ceilings (configurable, not hardcoded)'. Also addressed in the Promise."
+        },
+        {
+          "text": "Presents the complete draft for user confirmation",
+          "passed": true,
+          "evidence": "Step 4 presents the draft and asks 4 specific questions: assumed auth system exists, proposed fail-open behavior, left numbers configurable, included rate limit headers. Asks 'Anything to add or change?'"
+        },
+        {
+          "text": "Shows the acorn issue create command with --label ready-for-spec",
+          "passed": true,
+          "evidence": "Shows: acorn issue create candles \"Add Redis-backed API rate limiting with tiered limits\" --label ready-for-spec --body \"...\" with full issue body."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8571428571428571,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 165.6,
+        "tokens": 25711,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Identifies the request as too large for a single issue and proposes splitting",
+          "passed": true,
+          "evidence": "Step 2 explicitly states 'This idea clearly needs decomposition' and provides 4 bullet points explaining why: multiple independent user-facing outcomes, different subsystems, natural shipping boundaries, acceptance criteria span unrelated areas."
+        },
+        {
+          "text": "Decomposes into 2-4 separate issues with clear boundaries",
+          "passed": false,
+          "evidence": "Decomposed into 5 issues (core infrastructure, in-app UI, email delivery, user preferences, admin templates). While boundaries are clear and well-defined, 5 exceeds the 2-4 range. The decomposition separated email delivery and user preferences into distinct issues, where the baseline combined them."
+        },
+        {
+          "text": "Each decomposed issue has its own Job Story, Promise, and Acceptance Criteria",
+          "passed": true,
+          "evidence": "All 5 issues have complete Job Story (When/I want/so I can format), Promise, Constraints, and Acceptance Criteria sections. Each is self-contained with 8-11 acceptance criteria per issue."
+        },
+        {
+          "text": "Shows dependency relationships between the decomposed issues",
+          "passed": true,
+          "evidence": "Includes a dependency table (# | Issue | Depends On | Rationale), an ASCII dependency graph, recommended implementation order with parallelization notes, and pipeline mode recommendations per issue."
+        },
+        {
+          "text": "Notification preferences/configuration is separated from the core notification infrastructure",
+          "passed": true,
+          "evidence": "Issue #4 (User notification preferences) is a dedicated issue, completely separate from Issue #1 (Core notification infrastructure). Depends on #1, #2, and #3 as prerequisites."
+        },
+        {
+          "text": "Admin panel is a separate issue from user-facing notifications",
+          "passed": true,
+          "evidence": "Issue #5 (Admin notification template management) is a dedicated issue separate from Issues #2 and #3 (user-facing). Depends on #1 and #3 only."
+        },
+        {
+          "text": "Presents all issues for user confirmation before creating any",
+          "passed": true,
+          "evidence": "Step 4 presents all issues with dependency graph and implementation order. Step 5 shows all 5 acorn issue create commands labeled 'DRY RUN \u2014 NOT EXECUTED', with post-creation steps noting to update cross-references after user confirms."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 68.2,
+        "tokens": 17255,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Draws out specifics from the vague input (asks questions OR makes explicit assumptions)",
+          "passed": true,
+          "evidence": "Asked 6 clarifying questions covering what, who, how, trigger, privacy, and scope. Then made 5 explicit assumptions when moving to draft. More questions than the with_skill version (6 vs 3), but still drew out specifics."
+        },
+        {
+          "text": "Produces a Job Story in 'When [situation], I want to [action], so I can [outcome]' format with specific details",
+          "passed": true,
+          "evidence": "Job Story: 'When I'm looking at a trading opportunity or portfolio view in Replay and want a colleague's input, I want to generate a shareable link I can send them, so I can get feedback without having to screenshot or describe what I'm seeing.'"
+        },
+        {
+          "text": "Produces a Promise that is testable and concrete, not vague",
+          "passed": true,
+          "evidence": "Promise: 'any authenticated user in the same organization can open a shared link and see the exact same view (data + layout) that the sharer was looking at when they created the link.' Testable and specific."
+        },
+        {
+          "text": "Produces Acceptance Criteria that are independently verifiable with checkbox format",
+          "passed": true,
+          "evidence": "6 acceptance criteria in checkbox format, each independently verifiable: generate shareable link, copy to clipboard, teammate sees same view, unauthenticated error, no arbitrary expiration, discoverable share action."
+        },
+        {
+          "text": "Includes Constraints section identifying what should not change",
+          "passed": true,
+          "evidence": "4 constraints: authenticated users only (same org), read-only, no data duplication/forking, existing navigation/URLs must not break."
+        },
+        {
+          "text": "Presents the complete draft for user confirmation before creating",
+          "passed": true,
+          "evidence": "Confirmation Step explicitly asks: 'Here's the draft issue. Before I create it, please review' with 3 specific questions about Job Story accuracy, assumptions, and acceptance criteria."
+        },
+        {
+          "text": "Shows the acorn issue create command that would be run",
+          "passed": true,
+          "evidence": "Shows full command: acorn issue create replay \"Add shareable links for trading views\" --body \"$(cat <<'EOF'...EOF)\" with complete issue body. Note: does not include --label ready-for-spec flag."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 68.8,
+        "tokens": 20345,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Produces a Job Story that frames the problem from the affected user's perspective",
+          "passed": true,
+          "evidence": "Job Story: 'When I am using the candles API during normal operations, I want the system to enforce per-client request limits, so that a single abusive or misconfigured client cannot degrade response times and availability for everyone else.' Frames from the affected user's perspective."
+        },
+        {
+          "text": "Produces a Promise with specific, measurable guarantees (e.g., request limits, response times)",
+          "passed": true,
+          "evidence": "Promise includes: 'per-client rate limit based on the client's tier (free or paid)', 'clear 429 response with rate limit metadata', 'Other clients' request latency and availability are unaffected'. Specific and measurable."
+        },
+        {
+          "text": "Adds Acceptance Criteria the user didn't explicitly mention (edge cases like what happens when limit is hit, rate limit headers, etc.)",
+          "passed": true,
+          "evidence": "Added: fail-open if Redis unavailable, rate limit headers (X-RateLimit-Limit/Remaining/Reset), 5ms p99 latency constraint, configurable via env vars, specific example numbers (60/600 req/min), isolation between clients."
+        },
+        {
+          "text": "Treats Redis mention as context/constraint rather than prescribing the solution",
+          "passed": true,
+          "evidence": "Redis in Constraints: 'Must use the existing Redis instance for rate limit counters (no new infrastructure)' and Context: 'Redis is already running in the infrastructure'. Not prescribed as the solution in the Job Story."
+        },
+        {
+          "text": "Addresses the tier-based limits (free vs paid) in the acceptance criteria",
+          "passed": true,
+          "evidence": "AC #2: 'Free-tier clients have a configurable request limit (e.g., 60 requests/minute)' and AC #3: 'Paid-tier clients have a separate, higher configurable request limit (e.g., 600 requests/minute)'. Even includes concrete example values."
+        },
+        {
+          "text": "Presents the complete draft for user confirmation",
+          "passed": true,
+          "evidence": "Presents draft and asks 4 specific questions: client identification method, specific limit numbers, fail-open vs fail-closed preference, endpoint exemptions."
+        },
+        {
+          "text": "Shows the acorn issue create command with --label ready-for-spec",
+          "passed": true,
+          "evidence": "Shows: acorn issue create candles \"Add tiered API rate limiting to protect service quality\" --label ready-for-spec --body \"$(cat <<'EOF'...EOF)\" with full issue body."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 131.8,
+        "tokens": 24576,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Identifies the request as too large for a single issue and proposes splitting",
+          "passed": true,
+          "evidence": "Analysis section identifies 'at least five distinct functional areas' and explicitly states 'Cramming all of this into a single issue would produce a sprawling spec that tries to design everything at once.' Proposes decomposition into 4 issues."
+        },
+        {
+          "text": "Decomposes into 2-4 separate issues with clear boundaries",
+          "passed": true,
+          "evidence": "Decomposed into 4 issues with clear boundaries: (1) Core infrastructure, (2) In-app notification center & triggers, (3) User preferences & email delivery, (4) Admin template management. Each has distinct subsystem scope."
+        },
+        {
+          "text": "Each decomposed issue has its own Job Story, Promise, and Acceptance Criteria",
+          "passed": true,
+          "evidence": "All 4 issues have complete Job Story, Promise, Constraints, and Acceptance Criteria sections. Each is self-contained with 9-11 acceptance criteria per issue."
+        },
+        {
+          "text": "Shows dependency relationships between the decomposed issues",
+          "passed": true,
+          "evidence": "Includes dependency decomposition table, ASCII dependency graph, recommended implementation order with parallelization notes (Issues 2 and 4 can run in parallel), and spec pipeline mode recommendations per issue."
+        },
+        {
+          "text": "Notification preferences/configuration is separated from the core notification infrastructure",
+          "passed": true,
+          "evidence": "Issue 3 covers user preferences (combined with email delivery) as a separate issue from Issue 1 (core infrastructure). Preferences are in a distinct issue with its own scope, dependencies, and acceptance criteria."
+        },
+        {
+          "text": "Admin panel is a separate issue from user-facing notifications",
+          "passed": true,
+          "evidence": "Issue 4 (Admin panel for managing notification templates) is fully separate from Issues 2 and 3 (user-facing). Can be built in parallel with Issues 2 and 3."
+        },
+        {
+          "text": "Presents all issues for user confirmation before creating any",
+          "passed": true,
+          "evidence": "Commands section labeled with full commands, and a 'Questions I Would Ask Before Creating These Issues' section with 5 confirmation questions. Notes 'Once the user confirms the decomposition and addresses these questions, the four commands would be run.'"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.9524,
+        "stddev": 0.0825,
+        "min": 0.8571,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 116.5667,
+        "stddev": 43.0454,
+        "min": 85.0,
+        "max": 165.6
+      },
+      "tokens": {
+        "mean": 22328.6667,
+        "stddev": 2929.7509,
+        "min": 20580,
+        "max": 25711
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 89.6,
+        "stddev": 36.5475,
+        "min": 68.2,
+        "max": 131.8
+      },
+      "tokens": {
+        "mean": 20725.3333,
+        "stddev": 3675.2891,
+        "min": 17255,
+        "max": 24576
+      }
+    },
+    "delta": {
+      "pass_rate": "-0.05",
+      "time_seconds": "+27.0",
+      "tokens": "+1603"
+    }
+  },
+  "notes": [
+    "ASSERTION DESIGN ISSUE: The only failing assertion ('Decomposes into 2-4 separate issues') was too restrictive. The with_skill version produced 5 well-bounded issues (separating email delivery from preferences), which is arguably better decomposition than the baseline's 4 issues (which combined email+preferences). Consider widening to '3-6 issues' in future iterations.",
+    "NON-DISCRIMINATING ASSERTIONS: Evals 1 and 2 show 100% pass for both configurations. The JTBD template format is well-known enough that baseline Claude produces high-quality issues even without the skill. The skill's value is more qualitative (coaching behavior, fewer questions, assumption-first approach) than captured by structural assertions.",
+    "QUALITATIVE DIFFERENCES (not captured by assertions): (1) With-skill asked 2-3 targeted questions vs baseline's 5-6; (2) With-skill led with assumptions+draft vs baseline leading with questions; (3) With-skill included --label ready-for-spec consistently, baseline missed it in eval 1; (4) With-skill included refinement paths showing how the issue would evolve based on different user responses.",
+    "TIME/TOKEN TRADEOFF: With-skill averaged 27s longer and 1600 more tokens. This is expected — the skill adds methodology context. For issue-craft, the time overhead is modest relative to the human time saved on issue quality."
+  ]
+}

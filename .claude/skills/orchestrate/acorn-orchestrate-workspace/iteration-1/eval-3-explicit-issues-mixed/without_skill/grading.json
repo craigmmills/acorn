@@ -1,0 +1,71 @@
+{
+  "expectations": [
+    {
+      "text": "Fetches specific issues by number using gh issue view",
+      "passed": false,
+      "evidence": "The output does not show fetching issues individually for analysis. It jumps directly to mode selection based on the user's descriptions and then launches all three with 'acorn create' (which fetches issues internally but doesn't expose them for dependency analysis)."
+    },
+    {
+      "text": "Analyzes dependencies between the 3 issues",
+      "passed": false,
+      "evidence": "No dependency analysis performed. Step 1 states 'All three commands are independent and can be run in parallel' without examining whether #23's API endpoint depends on #12's auth changes."
+    },
+    {
+      "text": "Assigns full mode to issue 12 (auth overhaul - architecturally complex)",
+      "passed": true,
+      "evidence": "Correctly assigns Full mode with detailed reasoning: 'cross-cutting concern that touches middleware, database schemas, session management, API routes. 4 diverse draft plans will explore different architectural approaches.'"
+    },
+    {
+      "text": "Assigns quick mode to issue 15 (config option - small and well-defined)",
+      "passed": true,
+      "evidence": "Correctly assigns Quick mode: 'bounded, well-understood change. This does not warrant 14 agents and 6 stages.'"
+    },
+    {
+      "text": "Assigns lite mode to issue 23 (new API endpoint - standard feature)",
+      "passed": true,
+      "evidence": "Correctly assigns Lite mode: 'standard feature with moderate complexity. Lite pipeline provides enough rigor without the overhead of the full pipeline.'"
+    },
+    {
+      "text": "Presents wave-ordered execution plan",
+      "passed": false,
+      "evidence": "No wave ordering. All 3 issues launched in parallel: 'All three commands are independent and can be run in parallel.' No dependency analysis to justify ordering."
+    },
+    {
+      "text": "Includes a user confirmation checkpoint before executing",
+      "passed": false,
+      "evidence": "No explicit confirmation checkpoint. The 'What I Would Present to the User - Before Execution' section announces what will happen but does not ask for confirmation or offer adjustment options. Goes straight from mode selection to 'Step 1: Launch All Three Spec Pipelines.'"
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 4,
+    "total": 7,
+    "pass_rate": 0.43
+  },
+  "timing": {
+    "executor_duration_seconds": 81.7,
+    "total_duration_seconds": 81.7
+  },
+  "claims": [
+    {
+      "claim": "Expected completion order: Quick ~5-10 min, Lite ~15-25 min, Full ~30-60 min",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Timing estimates are reasonable based on agent counts and stage complexity for each mode."
+    },
+    {
+      "claim": "Output artifacts match the correct pipeline stage structure per mode",
+      "type": "factual",
+      "verified": false,
+      "evidence": "Lists draft_plan_1.md for Lite mode, but Lite mode produces draft.md (singular), not numbered drafts. The Full and Quick artifacts are correct."
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "reason": "The mode assignment assertions (3, 4, 5) pass for both with-skill and without-skill because the user explicitly described the complexity of each issue. These assertions only discriminate when the user doesn't pre-characterize complexity. The dependency and wave-ordering assertions are the truly discriminating ones."
+      }
+    ],
+    "overall": "Good discrimination on eval 3. The baseline passes only 3/7 (mode assignments) while missing dependency analysis, wave ordering, and confirmation checkpoint — all key orchestration behaviors the skill teaches."
+  }
+}

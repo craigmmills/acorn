@@ -1,0 +1,61 @@
+{
+  "expectations": [
+    {
+      "text": "Uses gh issue list with label filter to discover issues",
+      "passed": true,
+      "evidence": "Step 1, command 1b shows: 'gh issue list -R <owner>/replay -l \"ready-for-spec\" --state open --json number,title,body,labels,comments'"
+    },
+    {
+      "text": "Checks for existing specs in progress before processing",
+      "passed": true,
+      "evidence": "Step 1, command 1a shows 'acorn list replay' and step 1c describes cross-referencing results to exclude existing specs."
+    },
+    {
+      "text": "Analyzes dependencies between issues (explicit refs and implicit code overlap)",
+      "passed": true,
+      "evidence": "Step 2 describes scanning for explicit dependency signals and analyzing implicit dependencies with a pairwise comparison framework."
+    },
+    {
+      "text": "Presents issues in wave-based execution plan with parallel grouping",
+      "passed": true,
+      "evidence": "Step 3 shows a detailed wave-based plan template with parallel grouping within waves and sequential execution across waves."
+    },
+    {
+      "text": "Assigns pipeline modes (full/lite/quick) with reasoning tied to issue complexity",
+      "passed": true,
+      "evidence": "Step 2 includes complexity assessment criteria for each mode. The plan template shows mode per issue with 1-line justification."
+    },
+    {
+      "text": "Includes a user confirmation checkpoint before executing",
+      "passed": true,
+      "evidence": "User Confirmation section explicitly states 'I would present this plan and wait for the user to confirm or adjust before executing anything' with specific adjustment options."
+    },
+    {
+      "text": "Describes monitoring strategy using acorn status",
+      "passed": true,
+      "evidence": "Step 4 shows 'acorn status replay' plus granular filesystem checks, progress reporting format, and failure handling."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 124.8,
+    "total_duration_seconds": 124.8
+  },
+  "claims": [
+    {
+      "claim": "Handles edge cases including no issues found, all already specced, circular dependencies, and session failures",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Error Handling section covers all four cases with specific responses and commands"
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "Baseline passes all assertions. The acorn docs in CLAUDE.md provide enough context for the baseline to produce a well-structured orchestration plan."
+  }
+}

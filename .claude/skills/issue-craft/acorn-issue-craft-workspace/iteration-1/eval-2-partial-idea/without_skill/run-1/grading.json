@@ -1,0 +1,48 @@
+{
+  "eval_id": 2,
+  "eval_name": "partial-idea",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "Produces a Job Story that frames the problem from the affected user's perspective",
+      "passed": true,
+      "evidence": "Job Story: 'When I am using the candles API during normal operations, I want the system to enforce per-client request limits, so that a single abusive or misconfigured client cannot degrade response times and availability for everyone else.' Frames from the affected user's perspective."
+    },
+    {
+      "text": "Produces a Promise with specific, measurable guarantees (e.g., request limits, response times)",
+      "passed": true,
+      "evidence": "Promise includes: 'per-client rate limit based on the client's tier (free or paid)', 'clear 429 response with rate limit metadata', 'Other clients' request latency and availability are unaffected'. Specific and measurable."
+    },
+    {
+      "text": "Adds Acceptance Criteria the user didn't explicitly mention (edge cases like what happens when limit is hit, rate limit headers, etc.)",
+      "passed": true,
+      "evidence": "Added: fail-open if Redis unavailable, rate limit headers (X-RateLimit-Limit/Remaining/Reset), 5ms p99 latency constraint, configurable via env vars, specific example numbers (60/600 req/min), isolation between clients."
+    },
+    {
+      "text": "Treats Redis mention as context/constraint rather than prescribing the solution",
+      "passed": true,
+      "evidence": "Redis in Constraints: 'Must use the existing Redis instance for rate limit counters (no new infrastructure)' and Context: 'Redis is already running in the infrastructure'. Not prescribed as the solution in the Job Story."
+    },
+    {
+      "text": "Addresses the tier-based limits (free vs paid) in the acceptance criteria",
+      "passed": true,
+      "evidence": "AC #2: 'Free-tier clients have a configurable request limit (e.g., 60 requests/minute)' and AC #3: 'Paid-tier clients have a separate, higher configurable request limit (e.g., 600 requests/minute)'. Even includes concrete example values."
+    },
+    {
+      "text": "Presents the complete draft for user confirmation",
+      "passed": true,
+      "evidence": "Presents draft and asks 4 specific questions: client identification method, specific limit numbers, fail-open vs fail-closed preference, endpoint exemptions."
+    },
+    {
+      "text": "Shows the acorn issue create command with --label ready-for-spec",
+      "passed": true,
+      "evidence": "Shows: acorn issue create candles \"Add tiered API rate limiting to protect service quality\" --label ready-for-spec --body \"$(cat <<'EOF'...EOF)\" with full issue body."
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  }
+}

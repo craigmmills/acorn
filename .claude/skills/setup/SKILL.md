@@ -45,6 +45,15 @@ ln -sf ~/Projects/acorn/main/claude/commands/acorn.md ~/.claude/commands/acorn.m
 
 # Acorn setup skill (this file)
 ln -sf ~/Projects/acorn/main/.claude/skills/setup ~/.claude/skills/acorn-setup
+
+# Acorn orchestrate skill
+ln -sf ~/Projects/acorn/main/.claude/skills/orchestrate ~/.claude/skills/acorn-orchestrate
+
+# Acorn issue-craft skill
+ln -sf ~/Projects/acorn/main/.claude/skills/issue-craft ~/.claude/skills/acorn-issue-craft
+
+# Acorn spec-review skill
+ln -sf ~/Projects/acorn/main/.claude/skills/spec-review ~/.claude/skills/acorn-spec-review
 ```
 
 ## Step 4: Fix Git Remote to SSH
@@ -66,6 +75,9 @@ acorn --help
 grep "ACORN GLOBAL CONTEXT" ~/.claude/CLAUDE.md
 ls -la ~/.claude/commands/acorn.md
 ls -la ~/.claude/skills/acorn-setup
+ls -la ~/.claude/skills/acorn-orchestrate
+ls -la ~/.claude/skills/acorn-issue-craft
+ls -la ~/.claude/skills/acorn-spec-review
 git --git-dir=$HOME/Projects/acorn/.bare remote -v | grep -q "git@github.com"
 ```
 
@@ -77,3 +89,6 @@ git --git-dir=$HOME/Projects/acorn/.bare remote -v | grep -q "git@github.com"
 | Global Claude config | `~/.claude/CLAUDE.md` | Acorn block appended (idempotent) |
 | /acorn command | `~/.claude/commands/acorn.md` | Full command reference (symlink to repo) |
 | /acorn-setup skill | `~/.claude/skills/acorn-setup/` | This bootstrap skill (symlink to repo) |
+| /acorn-orchestrate skill | `~/.claude/skills/acorn-orchestrate/` | Batch spec & implementation pipeline (symlink to repo) |
+| /acorn-issue-craft skill | `~/.claude/skills/acorn-issue-craft/` | Idea-to-issue crafting workflow (symlink to repo) |
+| /acorn-spec-review skill | `~/.claude/skills/acorn-spec-review/` | Spec review & implementation handoff (symlink to repo) |

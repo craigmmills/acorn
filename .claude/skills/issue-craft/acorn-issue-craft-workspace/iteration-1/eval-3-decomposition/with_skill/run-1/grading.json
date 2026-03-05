@@ -1,0 +1,48 @@
+{
+  "eval_id": 3,
+  "eval_name": "decomposition",
+  "configuration": "with_skill",
+  "expectations": [
+    {
+      "text": "Identifies the request as too large for a single issue and proposes splitting",
+      "passed": true,
+      "evidence": "Step 2 explicitly states 'This idea clearly needs decomposition' and provides 4 bullet points explaining why: multiple independent user-facing outcomes, different subsystems, natural shipping boundaries, acceptance criteria span unrelated areas."
+    },
+    {
+      "text": "Decomposes into 2-4 separate issues with clear boundaries",
+      "passed": false,
+      "evidence": "Decomposed into 5 issues (core infrastructure, in-app UI, email delivery, user preferences, admin templates). While boundaries are clear and well-defined, 5 exceeds the 2-4 range. The decomposition separated email delivery and user preferences into distinct issues, where the baseline combined them."
+    },
+    {
+      "text": "Each decomposed issue has its own Job Story, Promise, and Acceptance Criteria",
+      "passed": true,
+      "evidence": "All 5 issues have complete Job Story (When/I want/so I can format), Promise, Constraints, and Acceptance Criteria sections. Each is self-contained with 8-11 acceptance criteria per issue."
+    },
+    {
+      "text": "Shows dependency relationships between the decomposed issues",
+      "passed": true,
+      "evidence": "Includes a dependency table (# | Issue | Depends On | Rationale), an ASCII dependency graph, recommended implementation order with parallelization notes, and pipeline mode recommendations per issue."
+    },
+    {
+      "text": "Notification preferences/configuration is separated from the core notification infrastructure",
+      "passed": true,
+      "evidence": "Issue #4 (User notification preferences) is a dedicated issue, completely separate from Issue #1 (Core notification infrastructure). Depends on #1, #2, and #3 as prerequisites."
+    },
+    {
+      "text": "Admin panel is a separate issue from user-facing notifications",
+      "passed": true,
+      "evidence": "Issue #5 (Admin notification template management) is a dedicated issue separate from Issues #2 and #3 (user-facing). Depends on #1 and #3 only."
+    },
+    {
+      "text": "Presents all issues for user confirmation before creating any",
+      "passed": true,
+      "evidence": "Step 4 presents all issues with dependency graph and implementation order. Step 5 shows all 5 acorn issue create commands labeled 'DRY RUN \u2014 NOT EXECUTED', with post-creation steps noting to update cross-references after user confirms."
+    }
+  ],
+  "summary": {
+    "pass_rate": 0.8571428571428571,
+    "passed": 6,
+    "failed": 1,
+    "total": 7
+  }
+}

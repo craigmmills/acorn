@@ -1,0 +1,14 @@
+{
+  "eval_id": 2,
+  "eval_name": "partial-idea",
+  "prompt": "I want to add an API rate limiting system to candles. We're getting hammered by some clients making thousands of requests per minute and it's affecting other users. Should probably use Redis for the counters since we already have it running. Need different limits for free vs paid tiers.",
+  "assertions": [
+    {"text": "Produces a Job Story that frames the problem from the affected user's perspective"},
+    {"text": "Produces a Promise with specific, measurable guarantees (e.g., request limits, response times)"},
+    {"text": "Adds Acceptance Criteria the user didn't explicitly mention (edge cases like what happens when limit is hit, rate limit headers, etc.)"},
+    {"text": "Treats Redis mention as context/constraint rather than prescribing the solution"},
+    {"text": "Addresses the tier-based limits (free vs paid) in the acceptance criteria"},
+    {"text": "Presents the complete draft for user confirmation"},
+    {"text": "Shows the acorn issue create command with --label ready-for-spec"}
+  ]
+}

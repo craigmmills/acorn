@@ -1,0 +1,23 @@
+{
+  "skill_name": "acorn-spec-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Can you review the spec for the shareable links feature in replay? It was generated with acorn in lite mode. The spec is at ~/Projects/replay/main/.specs/add-shareable-links/plans/SPEC.md and the original issue is #42. I just want to know if it's ready to approve — don't implement anything yet.",
+      "expected_output": "A structured review covering completeness, feasibility, and alignment with the original issue, ending with an approval recommendation. Should NOT proceed to implementation.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "The acorn spec for rate limiting in candles is done (issue #18, quick mode). Can you review it and if it looks good, walk me through getting implementation started?",
+      "expected_output": "A structured review followed by guided handoff steps — showing the user the commands to create a worktree and start an agent, but letting them control each step.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I need you to handle issue #15 in replay end-to-end. The acorn spec is already generated (full mode) at .specs/add-notification-infrastructure/plans/SPEC.md. Review it and if it passes, approve it and spin up a worktree agent to implement it. The branch should be called add-notification-infrastructure.",
+      "expected_output": "A structured review followed by automatic approval, worktree creation, agent launch, and sending the spec to the agent — full automation because the user explicitly asked for end-to-end.",
+      "files": []
+    }
+  ]
+}

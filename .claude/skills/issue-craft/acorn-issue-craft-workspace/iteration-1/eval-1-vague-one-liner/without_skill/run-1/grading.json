@@ -1,0 +1,48 @@
+{
+  "eval_id": 1,
+  "eval_name": "vague-one-liner",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "Draws out specifics from the vague input (asks questions OR makes explicit assumptions)",
+      "passed": true,
+      "evidence": "Asked 6 clarifying questions covering what, who, how, trigger, privacy, and scope. Then made 5 explicit assumptions when moving to draft. More questions than the with_skill version (6 vs 3), but still drew out specifics."
+    },
+    {
+      "text": "Produces a Job Story in 'When [situation], I want to [action], so I can [outcome]' format with specific details",
+      "passed": true,
+      "evidence": "Job Story: 'When I'm looking at a trading opportunity or portfolio view in Replay and want a colleague's input, I want to generate a shareable link I can send them, so I can get feedback without having to screenshot or describe what I'm seeing.'"
+    },
+    {
+      "text": "Produces a Promise that is testable and concrete, not vague",
+      "passed": true,
+      "evidence": "Promise: 'any authenticated user in the same organization can open a shared link and see the exact same view (data + layout) that the sharer was looking at when they created the link.' Testable and specific."
+    },
+    {
+      "text": "Produces Acceptance Criteria that are independently verifiable with checkbox format",
+      "passed": true,
+      "evidence": "6 acceptance criteria in checkbox format, each independently verifiable: generate shareable link, copy to clipboard, teammate sees same view, unauthenticated error, no arbitrary expiration, discoverable share action."
+    },
+    {
+      "text": "Includes Constraints section identifying what should not change",
+      "passed": true,
+      "evidence": "4 constraints: authenticated users only (same org), read-only, no data duplication/forking, existing navigation/URLs must not break."
+    },
+    {
+      "text": "Presents the complete draft for user confirmation before creating",
+      "passed": true,
+      "evidence": "Confirmation Step explicitly asks: 'Here's the draft issue. Before I create it, please review' with 3 specific questions about Job Story accuracy, assumptions, and acceptance criteria."
+    },
+    {
+      "text": "Shows the acorn issue create command that would be run",
+      "passed": true,
+      "evidence": "Shows full command: acorn issue create replay \"Add shareable links for trading views\" --body \"$(cat <<'EOF'...EOF)\" with complete issue body. Note: does not include --label ready-for-spec flag."
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  }
+}

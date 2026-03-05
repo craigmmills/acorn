@@ -1,0 +1,14 @@
+{
+  "eval_id": 3,
+  "eval_name": "decomposition",
+  "prompt": "We need a full notification system for replay. Users should get notified when a replay they're watching finishes processing, when someone shares a replay with them, when there are comments on their replays, and they should be able to configure which notifications they get via email vs in-app. Also need an admin panel to manage notification templates.",
+  "assertions": [
+    {"text": "Identifies the request as too large for a single issue and proposes splitting"},
+    {"text": "Decomposes into 2-4 separate issues with clear boundaries"},
+    {"text": "Each decomposed issue has its own Job Story, Promise, and Acceptance Criteria"},
+    {"text": "Shows dependency relationships between the decomposed issues"},
+    {"text": "Notification preferences/configuration is separated from the core notification infrastructure"},
+    {"text": "Admin panel is a separate issue from user-facing notifications"},
+    {"text": "Presents all issues for user confirmation before creating any"}
+  ]
+}
