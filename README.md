@@ -16,6 +16,42 @@ Acorn takes a GitHub issue and runs it through a multi-agent planning pipeline t
 
 All modes ground planning in actual codebase reconnaissance. The difference is how many competing drafts, evaluations, and adversarial reviews are performed.
 
+## Workflows
+
+Acorn covers the full lifecycle from rough idea to running implementation. You can enter at any point.
+
+### Idea to Issue
+
+You have a vague idea — "we need better error handling" or "add dark mode". The `/acorn-issue-craft` skill walks you through a conversational refinement process: it draws out requirements, pushes back on vagueness, structures everything into a JTBD (Jobs to Be Done) template with Job Story, Promise, Constraints, and Acceptance Criteria, then creates the GitHub issue via `acorn issue create`.
+
+```
+"I want to add notifications" → /acorn-issue-craft → structured GitHub issue
+```
+
+### Issue to Spec
+
+You have a well-defined GitHub issue. `acorn create` fetches it, downloads any images, and launches a multi-agent planning pipeline that produces `SPEC.md`.
+
+```
+acorn create myapp 42 [--lite | --quick]
+```
+
+### Spec to Implementation
+
+The spec is ready. `/acorn-spec-review` evaluates it across completeness, feasibility, and alignment dimensions, then handles approval via `acorn approve` and optional worktree-based implementation handoff — creating the worktree, dispatching the agent, and delivering the spec.
+
+```
+/acorn-spec-review → review → approve → worktree agent
+```
+
+### Batch Processing
+
+Multiple issues to process? `/acorn-orchestrate` analyzes dependencies between issues, groups them into parallelizable waves, selects the right pipeline mode for each issue's complexity, and coordinates batch spec generation.
+
+```
+/acorn-orchestrate → dependency analysis → wave ordering → parallel spec generation
+```
+
 **The pipeline:**
 
 ```
@@ -73,6 +109,10 @@ gh auth status   # confirm you're logged in
 
 ## Installation
 
+### Easiest: `/acorn-setup` skill
+
+If you already have the repo cloned and Claude Code running, invoke `/acorn-setup` — it handles the binary symlink, global config, commands, skills, and git remote in one go.
+
 ### With Cashew (recommended)
 
 If you already have [cashew](https://github.com/andrewxhill/cashew) installed, `dev` is already in place. Just add acorn:
@@ -83,6 +123,17 @@ ln -s "$(pwd)/acorn/bin/acorn" /usr/local/bin/acorn
 
 # Register /acorn command with Claude Code
 ln -sf "$(pwd)/acorn/claude/commands/acorn.md" ~/.claude/commands/acorn.md
+
+# Install Claude Code skills
+ln -sf "$(pwd)/acorn/.claude/skills/setup" ~/.claude/skills/acorn-setup
+ln -sf "$(pwd)/acorn/.claude/skills/orchestrate" ~/.claude/skills/acorn-orchestrate
+ln -sf "$(pwd)/acorn/.claude/skills/issue-craft" ~/.claude/skills/acorn-issue-craft
+ln -sf "$(pwd)/acorn/.claude/skills/spec-review" ~/.claude/skills/acorn-spec-review
+
+# Append acorn global context to Claude config (idempotent)
+if ! grep -q "BEGIN ACORN GLOBAL CONTEXT" ~/.claude/CLAUDE.md 2>/dev/null; then
+  { echo ""; echo "<!-- BEGIN ACORN GLOBAL CONTEXT -->"; cat "$(pwd)/acorn/claude/global/CLAUDE.md"; echo "<!-- END ACORN GLOBAL CONTEXT -->"; } >> ~/.claude/CLAUDE.md
+fi
 
 acorn --help
 ```
@@ -104,6 +155,18 @@ export PATH="$HOME/path/to/acorn/bin:$PATH"
 # Register /acorn command with Claude Code
 mkdir -p ~/.claude/commands
 ln -sf "$(pwd)/acorn/claude/commands/acorn.md" ~/.claude/commands/acorn.md
+
+# Install Claude Code skills
+mkdir -p ~/.claude/skills
+ln -sf "$(pwd)/acorn/.claude/skills/setup" ~/.claude/skills/acorn-setup
+ln -sf "$(pwd)/acorn/.claude/skills/orchestrate" ~/.claude/skills/acorn-orchestrate
+ln -sf "$(pwd)/acorn/.claude/skills/issue-craft" ~/.claude/skills/acorn-issue-craft
+ln -sf "$(pwd)/acorn/.claude/skills/spec-review" ~/.claude/skills/acorn-spec-review
+
+# Append acorn global context to Claude config (idempotent)
+if ! grep -q "BEGIN ACORN GLOBAL CONTEXT" ~/.claude/CLAUDE.md 2>/dev/null; then
+  { echo ""; echo "<!-- BEGIN ACORN GLOBAL CONTEXT -->"; cat "$(pwd)/acorn/claude/global/CLAUDE.md"; echo "<!-- END ACORN GLOBAL CONTEXT -->"; } >> ~/.claude/CLAUDE.md
+fi
 ```
 
 ### Verify installation
@@ -111,6 +174,8 @@ ln -sf "$(pwd)/acorn/claude/commands/acorn.md" ~/.claude/commands/acorn.md
 ```bash
 acorn --help
 claude --version
+grep "ACORN GLOBAL CONTEXT" ~/.claude/CLAUDE.md
+ls -la ~/.claude/skills/acorn-*
 ```
 
 ### Cashew compatibility
@@ -120,6 +185,19 @@ Acorn is designed to work alongside cashew's `dev` session manager:
 - **Project layout**: Both use `~/Projects/<repo>/main/` (auto-detects `~/Projects` or `~/projects`)
 - **Sessions**: Acorn creates tmux sessions named `<repo>_specs_<slug>_claude` — these show up in `dev` session listings
 - **No conflicts**: Acorn's `.specs/` directory lives inside `main/` and doesn't interfere with cashew worktrees
+
+## Claude Code Skills
+
+Acorn ships four Claude Code skills that extend its capabilities beyond the CLI:
+
+| Skill | Trigger | Purpose |
+|-------|---------|---------|
+| `/acorn-setup` | "set up acorn", "install acorn" | Bootstrap the full acorn installation (binary, config, skills, git remote) |
+| `/acorn-issue-craft` | "I want to add...", "create an issue for..." | Conversational refinement of rough ideas into structured JTBD issues |
+| `/acorn-orchestrate` | "spec the ready-for-spec issues", "batch spec" | Multi-issue pipeline with dependency analysis, wave ordering, and mode selection |
+| `/acorn-spec-review` | "review this spec", "approve and implement" | Spec quality review across completeness/feasibility/alignment + implementation handoff |
+
+Skills are installed as symlinks to the repo (see Installation) and are available in any Claude Code session.
 
 ## Project Layout Convention
 
@@ -204,6 +282,27 @@ Output shows repo, issue number, slug, status, mode, age, clarification status, 
 - `review` — plans/SPEC.md exists, ready for human review
 - `approved` — spec has been approved for implementation
 - `unknown` — spec directory exists but state is unclear
+
+### Session dashboard
+
+```bash
+# Show session status across all repos
+acorn status
+
+# Filter to a specific repo
+acorn status myapp
+```
+
+Output columns:
+
+| Column | Description |
+|--------|-------------|
+| REPO | Repository name |
+| SLUG | Issue slug (e.g., `42-add-authentication`) |
+| SESSION | `running` or `dead` |
+| BACKEND | `tmux` or `dev` |
+| STATUS | Spec status (`planning`, `review`, `approved`) |
+| ATTACH | Command to attach to a running session |
 
 ### Approve a spec
 
@@ -304,6 +403,31 @@ acorn issue clarify myapp 42
 
 This swaps the clarification label from `ai-drafted` to `human-clarified` (or sets `human-clarified` if no clarification label is present).
 
+### Split an issue into sub-issues
+
+```bash
+acorn issue split myapp 42
+```
+
+Uses AI analysis (Claude Sonnet by default) to evaluate whether an issue should be decomposed into smaller, independently implementable sub-issues. If splitting is recommended:
+
+1. Displays the analysis with rationale and proposed sub-issues
+2. Asks for confirmation (or use `--yes` to skip)
+3. Creates the sub-issues on GitHub
+4. Posts a reference comment on the parent issue linking to the new sub-issues
+
+Options:
+- `--yes` — Skip confirmation prompt and create sub-issues automatically
+- `--model <model>` — Override the AI model used for analysis (default: `claude-sonnet-4-5`)
+
+```bash
+# Auto-confirm sub-issue creation
+acorn issue split myapp 42 --yes
+
+# Use a different model for analysis
+acorn issue split myapp 42 --model claude-opus-4-6
+```
+
 ## GitHub Label Lifecycle
 
 Acorn manages these labels automatically (creates them if they don't exist):
@@ -384,6 +508,9 @@ acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]
 acorn list [repo]
     List all specs and their status (optionally filtered by repo)
 
+acorn status [repo]
+    Show session dashboard — running/dead status, backend, and attach commands
+
 acorn approve <repo> <slug>
     Approve a completed spec for implementation
 
@@ -398,6 +525,11 @@ acorn issue plan <repo> <title> [options] [--no-auto] [--lite | --quick]
 
 acorn issue clarify <repo> <issue-number>
     Mark an issue as human-clarified (swap from ai-drafted)
+
+acorn issue split <repo> <issue-number> [--yes] [--model <model>]
+    Analyze an issue and recommend splitting into sub-issues
+    --yes       Skip confirmation and create sub-issues automatically
+    --model     Override the AI model for analysis (default: claude-sonnet-4-5)
 ```
 
 ## Testing
@@ -406,6 +538,8 @@ acorn issue clarify <repo> <issue-number>
 # Run unit tests (no network calls to GitHub API)
 bash test/test_images.sh
 bash test/test_labels.sh
+bash test/test_auto_trigger.sh
+bash test/test_split.sh
 
 # Run full suites including integration tests
 # (creates temporary GitHub issues, verifies image/label flows, cleans up)
