@@ -38,10 +38,10 @@ acorn create myapp 42 [--lite | --quick]
 
 ### Spec to Implementation
 
-The spec is ready. `/acorn-spec-review` evaluates it across completeness, feasibility, and alignment dimensions, then handles approval via `acorn approve` and optional worktree-based implementation handoff — creating the worktree, dispatching the agent, and delivering the spec.
+Acorn's responsibility ends at spec approval (`acorn approve`). The `/acorn-spec-review` skill evaluates the spec across completeness, feasibility, and alignment dimensions, then runs `acorn approve`. Implementation handoff is optional and uses [cashew](https://github.com/andrewxhill/cashew)'s `dev` commands (`dev wt`, `dev <repo>/<branch>/pi`) to create worktrees and dispatch agents — this is cashew's domain, not acorn's.
 
 ```
-/acorn-spec-review → review → approve → worktree agent
+/acorn-spec-review → review → acorn approve → [cashew: dev wt + agent dispatch]
 ```
 
 ### Batch Processing
