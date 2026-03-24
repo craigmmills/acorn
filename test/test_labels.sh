@@ -107,17 +107,18 @@ test_print_list_row_columns() {
   printf '\n\033[1m== print_list_row columns ==\033[0m\n'
 
   local output
-  output="$(print_list_row "myrepo" "42" "42-my-slug" "planning" "lite" "2h" "ai-drafted" "/tmp/spec")"
+  output="$(print_list_row "myrepo" "42" "42-my-slug" "planning" "lite" "2h" "ai-drafted" "2" "/tmp/spec")"
   assert_contains "repo in output" "$output" "myrepo"
   assert_contains "issue in output" "$output" "42"
   assert_contains "status in output" "$output" "planning"
   assert_contains "clarify in output" "$output" "ai-drafted"
+  assert_contains "deps in output" "$output" "2"
   assert_contains "path in output" "$output" "/tmp/spec"
 
-  output="$(print_list_row "myrepo" "42" "42-my-slug" "approved" "full" "1d" "clarified" "/tmp/spec")"
+  output="$(print_list_row "myrepo" "42" "42-my-slug" "approved" "full" "1d" "clarified" "--" "/tmp/spec")"
   assert_contains "clarified in output" "$output" "clarified"
 
-  output="$(print_list_row "myrepo" "42" "42-my-slug" "unknown" "full" "3d" "--" "/tmp/spec")"
+  output="$(print_list_row "myrepo" "42" "42-my-slug" "unknown" "full" "3d" "--" "--" "/tmp/spec")"
   assert_contains "dash in output" "$output" "--"
 }
 
@@ -127,6 +128,7 @@ test_print_list_header() {
   local output
   output="$(print_list_header)"
   assert_contains "has clarify header" "$output" "clarify"
+  assert_contains "has deps header" "$output" "deps"
   assert_contains "has spec_path header" "$output" "spec_path"
 }
 

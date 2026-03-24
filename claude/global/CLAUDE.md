@@ -18,7 +18,7 @@ acorn create <repo> <issue#> --lite       # Lite pipeline (4 stages, 6 agents)
 acorn create <repo> <issue#> --quick      # Quick pipeline (2 stages, 4 agents)
 acorn create <repo> <issue#> --no-auto    # Don't auto-trigger planning
 acorn list                                 # List all specs across all repos
-acorn list <repo>                          # List specs for a specific repo
+acorn list <repo> [--deps]                 # List specs for a specific repo (optional dependency counts)
 acorn status [repo]                        # Show session dashboard (running/dead/no-session)
 acorn approve <repo> <slug>               # Mark spec as approved for implementation
 acorn clean <repo> <slug> [--yes] [--force] # Kill session + delete spec (refuses if SPEC.md exists and issue open; --force overrides)
@@ -26,6 +26,8 @@ acorn issue create <repo> <title> [--body <text>] [--raw] [--label <name>]... [-
 acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + immediately start spec generation
 acorn issue clarify <repo> <issue#>    # Mark issue as human-clarified (swap from ai-drafted)
 acorn issue split <repo> <issue#> [--yes] [--model <model>]  # Analyze issue for splitting into sub-issues
+acorn issue depends <repo> <issue#> [--blocked-by <issue#>] [--remove-blocked-by <issue#>]
+acorn deps graph <repo> <issue#> [<issue#>...]   # Show wave execution order for batch
 ```
 
 **Issue template format:** When using `acorn issue create` without `--body`/`--body-file`/`--raw`, an interactive template prompts for: Job Story (JTBD), Promise, Constraints, Acceptance Criteria, Context. All sections are optional. When creating issues programmatically, use `--body` with this markdown structure:

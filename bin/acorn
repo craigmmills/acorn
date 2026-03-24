@@ -9,6 +9,8 @@ if [ -d "$HOME/Projects" ]; then
 fi
 LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
 CLARIFICATION_LABELS=("ai-drafted" "human-clarified")
+_SHOW_DEPS=0
+_LIST_NWO=""
 auto_trigger_message() {
   local spec_path="$1"
   local mode="${2:-full}"
@@ -27,19 +29,27 @@ usage() {
   cat <<'EOF'
 Usage:
   acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]
-  acorn list [repo]
+  acorn list [repo] [--deps]
   acorn status [repo]
   acorn approve <repo> <slug>
   acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
-  acorn issue create <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]...
-  acorn issue plan <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]... [--no-auto] [--lite | --quick]
+  acorn issue create <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]... [--blocked-by <issue#>[,<issue#>...]]
+  acorn issue plan <repo> <title> [options] [--blocked-by <issue#>[,<issue#>...]] [--no-auto] [--lite | --quick]
   acorn issue clarify <repo> <issue-number>
   acorn issue split <repo> <issue-number> [--yes] [--model <model>]
+  acorn issue depends <repo> <issue#> [--blocked-by <issue#>[,<issue#>...]] [--remove-blocked-by <issue#>[,<issue#>...]]
+  acorn deps graph <repo> <issue#> [<issue#>...]
 
 Pipeline modes:
   (default)   Full 6-stage pipeline — 14 agents, Opus recon + Opus planning
   --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus planning
   --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
+
+Dependency management:
+  acorn issue depends <repo> <issue#>                       Show dependencies
+  acorn issue depends <repo> <issue#> --blocked-by 5,12     Add blockers
+  acorn issue depends <repo> <issue#> --remove-blocked-by 5 Remove a blocker
+  acorn deps graph <repo> <issue#> [<issue#>...]            Show wave execution order
 EOF
 }
 
@@ -214,6 +224,276 @@ comment_issue() {
     cd "$repo_main"
     gh issue comment "$issue_number" --body "$body" >/dev/null
   ) || warn "Failed posting comment on issue #$issue_number"
+}
+
+# Resolve GitHub owner/repo (nameWithOwner) from local repo path.
+gh_repo_nwo() {
+  local repo_main="$1"
+  (
+    cd "$repo_main"
+    gh repo view --json nameWithOwner -q '.nameWithOwner'
+  ) || die "Failed to resolve GitHub repo name from: $repo_main"
+}
+
+# Fetch issues that block a given issue.
+# Returns JSON array from GitHub API, or '[]' on failure.
+get_blocked_by() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local nwo="${3:-}"
+  [ -n "$nwo" ] || nwo="$(gh_repo_nwo "$repo_main")"
+  local result
+  result="$(
+    cd "$repo_main"
+    gh api "repos/${nwo}/issues/${issue_number}/dependencies/blocked_by" 2>/dev/null
+  )" || { printf '[]'; return 0; }
+
+  if printf '%s' "$result" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf '%s' "$result"
+  else
+    printf '[]'
+  fi
+}
+
+# Fetch issues that a given issue blocks (reverse direction).
+# Returns JSON array, or '[]' on failure.
+get_blocking() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local nwo="${3:-}"
+  [ -n "$nwo" ] || nwo="$(gh_repo_nwo "$repo_main")"
+  local result
+  result="$(
+    cd "$repo_main"
+    gh api "repos/${nwo}/issues/${issue_number}/dependencies/blocking" 2>/dev/null
+  )" || { printf '[]'; return 0; }
+
+  if printf '%s' "$result" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf '%s' "$result"
+  else
+    printf '[]'
+  fi
+}
+
+# Add a single blocked-by relationship.
+# Returns 0 on success, 1 on failure (with warning).
+add_blocked_by_dependency() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local blocker_number="$3"
+  local nwo="${4:-}"
+
+  case "$blocker_number" in
+    ''|*[!0-9]*) warn "Invalid issue number for --blocked-by: '$blocker_number'"; return 1 ;;
+  esac
+  [ "$blocker_number" -gt 0 ] 2>/dev/null || { warn "Invalid issue number for --blocked-by: '$blocker_number'"; return 1; }
+
+  if [ "$issue_number" = "$blocker_number" ]; then
+    warn "Issue #$issue_number cannot block itself"
+    return 1
+  fi
+
+  [ -n "$nwo" ] || nwo="$(gh_repo_nwo "$repo_main")"
+  info "Adding dependency: #$issue_number blocked by #$blocker_number"
+  (
+    cd "$repo_main"
+    gh api --method POST \
+      "repos/${nwo}/issues/${issue_number}/dependencies/blocked_by" \
+      -f blocked_by_issue_number="$blocker_number" >/dev/null
+  ) || { warn "Failed to add blocked-by #$blocker_number for issue #$issue_number"; return 1; }
+}
+
+# Remove a single blocked-by relationship.
+# Returns 0 on success, 1 on failure (with warning).
+remove_blocked_by_dependency() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local blocker_number="$3"
+  local nwo="${4:-}"
+
+  case "$blocker_number" in
+    ''|*[!0-9]*) warn "Invalid issue number for --remove-blocked-by: '$blocker_number'"; return 1 ;;
+  esac
+
+  [ -n "$nwo" ] || nwo="$(gh_repo_nwo "$repo_main")"
+  info "Removing dependency: #$issue_number no longer blocked by #$blocker_number"
+  (
+    cd "$repo_main"
+    gh api --method DELETE \
+      "repos/${nwo}/issues/${issue_number}/dependencies/blocked_by/${blocker_number}" >/dev/null
+  ) || { warn "Failed to remove blocked-by #$blocker_number from issue #$issue_number"; return 1; }
+}
+
+# Detect if adding "issue_number blocked-by blocker_number" would create a cycle.
+# Returns 0 if cycle detected, 1 if safe.
+detect_circular_dependency() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local blocker_number="$3"
+  local nwo="${4:-}"
+  [ -n "$nwo" ] || nwo="$(gh_repo_nwo "$repo_main")"
+
+  local visited="$issue_number"
+
+  _cycle_dfs() {
+    local current="$1"
+    local blockers_json
+    blockers_json="$(get_blocked_by "$repo_main" "$current" "$nwo")"
+    local dep_num
+    while IFS= read -r dep_num; do
+      [ -n "$dep_num" ] || continue
+      if [ "$dep_num" = "$issue_number" ]; then
+        return 0
+      fi
+      case " $visited " in
+        *" $dep_num "*) continue ;;
+      esac
+      visited="$visited $dep_num"
+      _cycle_dfs "$dep_num" && return 0
+    done < <(printf '%s' "$blockers_json" | jq -r '.[].number // empty')
+    return 1
+  }
+
+  _cycle_dfs "$blocker_number"
+  local result=$?
+  unset -f _cycle_dfs 2>/dev/null || true
+  return $result
+}
+
+# Add multiple blocked-by dependencies with cycle detection.
+add_blocked_by_bulk() {
+  local repo_main="$1"
+  local issue_number="$2"
+  shift 2
+  local nwo
+  nwo="$(gh_repo_nwo "$repo_main")"
+  local num
+  for num in "$@"; do
+    num="$(printf '%s' "$num" | tr -d '[:space:]')"
+    [ -n "$num" ] || continue
+    if detect_circular_dependency "$repo_main" "$issue_number" "$num" "$nwo"; then
+      warn "Circular dependency: adding #$num as blocker of #$issue_number would create a cycle. Skipping."
+      continue
+    fi
+    add_blocked_by_dependency "$repo_main" "$issue_number" "$num" "$nwo" || true
+  done
+}
+
+# Return the count of issues blocking a given issue.
+blocked_by_count() {
+  local repo_main="$1"
+  local issue_number="$2"
+  local nwo="${3:-}"
+  local json
+  json="$(get_blocked_by "$repo_main" "$issue_number" "$nwo")"
+  printf '%s' "$json" | jq 'length'
+}
+
+# Build dependency graph for a set of issues.
+# Output: lines of "ISSUE BLOCKER" pairs, or "ISSUE NONE" for unblocked issues.
+build_dependency_graph() {
+  local repo_main="$1"
+  shift
+  local issues=("$@")
+  local nwo
+  nwo="$(gh_repo_nwo "$repo_main")"
+
+  local issue
+  for issue in "${issues[@]}"; do
+    local blockers_json
+    blockers_json="$(get_blocked_by "$repo_main" "$issue" "$nwo")"
+    local has_dep=0
+    local dep_num
+    while IFS= read -r dep_num; do
+      [ -n "$dep_num" ] || continue
+      local in_set=0
+      local check
+      for check in "${issues[@]}"; do
+        [ "$check" != "$dep_num" ] || { in_set=1; break; }
+      done
+      if [ "$in_set" -eq 1 ]; then
+        printf '%s %s\n' "$issue" "$dep_num"
+        has_dep=1
+      fi
+    done < <(printf '%s' "$blockers_json" | jq -r '.[].number // empty')
+    if [ "$has_dep" -eq 0 ]; then
+      printf '%s NONE\n' "$issue"
+    fi
+  done
+}
+
+# Topological sort using Kahn's algorithm.
+# Reads dependency pairs from stdin ("ISSUE BLOCKER" or "ISSUE NONE").
+# Outputs waves separated by "---" lines.
+topological_sort_waves() {
+  local all_issues=""
+  local edges=""
+
+  while IFS=' ' read -r issue dep; do
+    case " $all_issues " in
+      *" $issue "*) ;;
+      *) all_issues="$all_issues $issue" ;;
+    esac
+    if [ "$dep" != "NONE" ]; then
+      edges="$edges|$issue $dep"
+    fi
+  done
+
+  all_issues="${all_issues# }"
+  [ -n "$all_issues" ] || return 0
+
+  local remaining="$all_issues"
+  local wave_num=0
+
+  while [ -n "$remaining" ]; do
+    wave_num=$((wave_num + 1))
+    local wave_issues=""
+
+    local candidate
+    for candidate in $remaining; do
+      local is_blocked=0
+      IFS='|'
+      local edge
+      for edge in $edges; do
+        [ -n "$edge" ] || continue
+        local e_blocked="${edge%% *}"
+        local e_blocker="${edge##* }"
+        if [ "$e_blocked" = "$candidate" ]; then
+          case " $remaining " in
+            *" $e_blocker "*) is_blocked=1; break ;;
+          esac
+        fi
+      done
+      IFS=$'\n\t'
+      if [ "$is_blocked" -eq 0 ]; then
+        wave_issues="$wave_issues $candidate"
+      fi
+    done
+
+    wave_issues="${wave_issues# }"
+
+    if [ -z "$wave_issues" ]; then
+      die "Circular dependency detected in batch: remaining issues [$remaining] have unresolvable dependencies"
+    fi
+
+    if [ "$wave_num" -gt 1 ]; then
+      printf -- '---\n'
+    fi
+    local wi
+    for wi in $wave_issues; do
+      printf '%s\n' "$wi"
+    done
+
+    local new_remaining=""
+    local r
+    for r in $remaining; do
+      case " $wave_issues " in
+        *" $r "*) ;;
+        *) new_remaining="$new_remaining $r" ;;
+      esac
+    done
+    remaining="${new_remaining# }"
+  done
 }
 
 planning_block() {
@@ -1579,7 +1859,7 @@ clarification_for_issue() {
 }
 
 print_list_header() {
-  printf '%-16s %-8s %-40s %-10s %-6s %-8s %-11s %s\n' "repo" "issue" "slug" "status" "mode" "age" "clarify" "spec_path"
+  printf '%-16s %-8s %-40s %-10s %-6s %-8s %-11s %-6s %s\n' "repo" "issue" "slug" "status" "mode" "age" "clarify" "deps" "spec_path"
 }
 
 print_list_row() {
@@ -1590,8 +1870,9 @@ print_list_row() {
   local mode="$5"
   local age="$6"
   local clarify="$7"
-  local path="$8"
-  printf '%-16s %-8s %-40s %-10s %-6s %-8s %-11s %s\n' "$repo" "$issue" "$slug" "$status" "$mode" "$age" "$clarify" "$path"
+  local deps="$8"
+  local path="$9"
+  printf '%-16s %-8s %-40s %-10s %-6s %-8s %-11s %-6s %s\n' "$repo" "$issue" "$slug" "$status" "$mode" "$age" "$clarify" "$deps" "$path"
 }
 
 print_status_header() {
@@ -1636,7 +1917,23 @@ list_specs_for_repo() {
     fi
     local age
     age="$(human_age "$(file_mtime_epoch "$dir")")"
-    print_list_row "$repo" "${issue:-?}" "$slug" "$status" "$mode" "$age" "$clarify" "$dir"
+    local deps="--"
+    if [ "$_SHOW_DEPS" -eq 1 ] && [ -n "$issue" ] && [ "$issue" != "?" ]; then
+      local _list_nwo
+      _list_nwo="${_LIST_NWO:-}"
+      if [ -z "$_list_nwo" ]; then
+        _list_nwo="$(gh_repo_nwo "$repo_main" 2>/dev/null || true)"
+        _LIST_NWO="$_list_nwo"
+      fi
+      if [ -n "$_list_nwo" ]; then
+        local dep_count
+        dep_count="$(blocked_by_count "$repo_main" "$issue" "$_list_nwo" 2>/dev/null || printf '0')"
+        if [ "$dep_count" -gt 0 ] 2>/dev/null; then
+          deps="$dep_count"
+        fi
+      fi
+    fi
+    print_list_row "$repo" "${issue:-?}" "$slug" "$status" "$mode" "$age" "$clarify" "$deps" "$dir"
   done
 }
 
@@ -1831,7 +2128,22 @@ cmd_create() {
 }
 
 cmd_list() {
-  local repo="${1:-}"
+  local repo=""
+  _SHOW_DEPS=0
+  _LIST_NWO=""
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --deps)
+        _SHOW_DEPS=1
+        ;;
+      *)
+        repo="$1"
+        ;;
+    esac
+    shift
+  done
+
   require_cmds gh jq
   print_list_header
   if [ -n "$repo" ]; then
@@ -1839,6 +2151,9 @@ cmd_list() {
   else
     list_specs_all
   fi
+
+  _SHOW_DEPS=0
+  _LIST_NWO=""
 }
 
 cmd_status() {
@@ -2303,6 +2618,56 @@ create_sub_issues() {
   fi
 }
 
+cmd_deps_graph() {
+  local repo="$1"
+  shift
+
+  [ "$#" -ge 1 ] || die "Usage: acorn deps graph <repo> <issue#> [<issue#>...]"
+
+  require_cmds gh jq
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  local issues=("$@")
+  info "Building dependency graph for ${#issues[@]} issues..."
+
+  local graph
+  graph="$(build_dependency_graph "$repo_main" "${issues[@]}")"
+
+  if [ -z "$graph" ]; then
+    echo "No issues to process."
+    return 0
+  fi
+
+  echo ""
+  echo "Dependency edges:"
+  printf '%s\n' "$graph"
+
+  local wave_output
+  wave_output="$(printf '%s\n' "$graph" | topological_sort_waves)"
+
+  echo ""
+  echo "Execution plan:"
+  local wave_num=0
+  local in_wave=0
+  local line
+  while IFS= read -r line; do
+    if [ "$line" = "---" ]; then
+      in_wave=0
+      continue
+    fi
+    if [ "$in_wave" -eq 0 ]; then
+      wave_num=$((wave_num + 1))
+      printf '\nWave %d:\n' "$wave_num"
+      in_wave=1
+    fi
+    printf '  #%s\n' "$line"
+  done < <(printf '%s\n' "$wave_output")
+
+  echo ""
+  printf 'Total: %d wave(s), %d issue(s)\n' "$wave_num" "${#issues[@]}"
+}
+
 cmd_issue_clarify() {
   local repo="$1"
   local issue_number="$2"
@@ -2426,24 +2791,111 @@ cmd_issue_split() {
   echo "Next steps: run 'acorn create $repo <sub-issue#>' for each sub-issue."
 }
 
+cmd_issue_depends() {
+  local repo="$1"
+  local issue_number="$2"
+  shift 2
+
+  local add_blocked=()
+  local remove_blocked=()
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --blocked-by)
+        [ "$#" -ge 2 ] || die "--blocked-by requires a value"
+        IFS=',' read -ra nums <<< "$2"
+        add_blocked+=("${nums[@]}")
+        shift 2
+        ;;
+      --remove-blocked-by)
+        [ "$#" -ge 2 ] || die "--remove-blocked-by requires a value"
+        IFS=',' read -ra nums <<< "$2"
+        remove_blocked+=("${nums[@]}")
+        shift 2
+        ;;
+      *)
+        die "Unknown option for issue depends: $1"
+        ;;
+    esac
+  done
+
+  require_cmds gh jq
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+  local nwo
+  nwo="$(gh_repo_nwo "$repo_main")"
+
+  local num
+  for num in "${remove_blocked[@]+"${remove_blocked[@]}"}"; do
+    num="$(printf '%s' "$num" | tr -d '[:space:]')"
+    [ -n "$num" ] || continue
+    remove_blocked_by_dependency "$repo_main" "$issue_number" "$num" "$nwo" || true
+  done
+
+  for num in "${add_blocked[@]+"${add_blocked[@]}"}"; do
+    num="$(printf '%s' "$num" | tr -d '[:space:]')"
+    [ -n "$num" ] || continue
+    if detect_circular_dependency "$repo_main" "$issue_number" "$num" "$nwo"; then
+      warn "Circular dependency: #$num -> ... -> #$issue_number. Skipping #$num."
+      continue
+    fi
+    add_blocked_by_dependency "$repo_main" "$issue_number" "$num" "$nwo" || true
+  done
+
+  echo ""
+  echo "Issue #$issue_number dependencies:"
+  echo ""
+
+  echo "Blocked by:"
+  local blocked_by_json
+  blocked_by_json="$(get_blocked_by "$repo_main" "$issue_number" "$nwo")"
+  local bb_count
+  bb_count="$(printf '%s' "$blocked_by_json" | jq 'length')"
+  if [ "$bb_count" -eq 0 ]; then
+    echo "  (none)"
+  else
+    printf '%s' "$blocked_by_json" | jq -r '.[] | "  #\(.number) \(.title // "untitled") [\(.state // "unknown")]"'
+  fi
+
+  echo ""
+  echo "Blocks:"
+  local blocking_json
+  blocking_json="$(get_blocking "$repo_main" "$issue_number" "$nwo")"
+  local bl_count
+  bl_count="$(printf '%s' "$blocking_json" | jq 'length')"
+  if [ "$bl_count" -eq 0 ]; then
+    echo "  (none)"
+  else
+    printf '%s' "$blocking_json" | jq -r '.[] | "  #\(.number) \(.title // "untitled") [\(.state // "unknown")]"'
+  fi
+}
+
 cmd_issue_create() {
   local repo="$1"
   local title="$2"
   shift 2
 
-  # Separate --raw from args passed to create_issue_in_repo
+  # Separate special flags from args passed to create_issue_in_repo
   local raw=0
   local pass_args=()
+  local blocked_by=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --raw)
         raw=1
+        shift
+        ;;
+      --blocked-by)
+        [ "$#" -ge 2 ] || die "--blocked-by requires a value"
+        IFS=',' read -ra _bb_nums <<< "$2"
+        blocked_by+=("${_bb_nums[@]}")
+        shift 2
         ;;
       *)
         pass_args+=("$1")
+        shift
         ;;
     esac
-    shift
   done
 
   # Detect if --body or --body-file was provided
@@ -2478,6 +2930,10 @@ cmd_issue_create() {
   ensure_labels "$repo_main"
   set_clarification_label "$repo_main" "$issue_num" "ai-drafted"
 
+  if [ "${#blocked_by[@]}" -gt 0 ]; then
+    add_blocked_by_bulk "$repo_main" "$issue_num" "${blocked_by[@]}"
+  fi
+
   echo "Created issue in $repo"
   echo "Issue: #$issue_num"
   echo "URL: $issue_url"
@@ -2492,19 +2948,28 @@ cmd_issue_plan() {
   local create_flags=()
   local issue_args=()
   local raw=0
+  local blocked_by=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --no-auto|--lite|--quick)
         create_flags+=("$1")
+        shift
         ;;
       --raw)
         raw=1
+        shift
+        ;;
+      --blocked-by)
+        [ "$#" -ge 2 ] || die "--blocked-by requires a value"
+        IFS=',' read -ra _bb_nums <<< "$2"
+        blocked_by+=("${_bb_nums[@]}")
+        shift 2
         ;;
       *)
         issue_args+=("$1")
+        shift
         ;;
     esac
-    shift
   done
 
   # Detect if --body or --body-file was provided
@@ -2539,6 +3004,10 @@ cmd_issue_plan() {
   ensure_labels "$repo_main"
   set_clarification_label "$repo_main" "$issue_num" "ai-drafted"
 
+  if [ "${#blocked_by[@]}" -gt 0 ]; then
+    add_blocked_by_bulk "$repo_main" "$issue_num" "${blocked_by[@]}"
+  fi
+
   echo "Created issue in $repo"
   echo "Issue: #$issue_num"
   echo "URL: $issue_url"
@@ -2561,11 +3030,8 @@ main() {
       cmd_create "$_c_repo" "$_c_issue" "$@"
       ;;
     list)
-      if [ "$#" -gt 2 ]; then
-        usage
-        exit 1
-      fi
-      cmd_list "${2:-}"
+      shift 1
+      cmd_list "$@"
       ;;
     status)
       if [ "$#" -gt 2 ]; then
@@ -2584,6 +3050,22 @@ main() {
       slug="$3"
       shift 3
       cmd_clean "$repo" "$slug" "$@"
+      ;;
+    deps)
+      [ "$#" -ge 2 ] || { usage; exit 1; }
+      subcmd="$2"
+      case "$subcmd" in
+        graph)
+          [ "$#" -ge 4 ] || die "Usage: acorn deps graph <repo> <issue#> [<issue#>...]"
+          repo="$3"
+          shift 3
+          cmd_deps_graph "$repo" "$@"
+          ;;
+        *)
+          usage
+          die "Unknown deps subcommand: $subcmd"
+          ;;
+      esac
       ;;
     issue)
       [ "$#" -ge 2 ] || { usage; exit 1; }
@@ -2616,6 +3098,13 @@ main() {
           local _sp_issue="$4"
           shift 4
           cmd_issue_split "$repo" "$_sp_issue" "$@"
+          ;;
+        depends)
+          [ "$#" -ge 4 ] || { usage; exit 1; }
+          repo="$3"
+          local _dep_issue="$4"
+          shift 4
+          cmd_issue_depends "$repo" "$_dep_issue" "$@"
           ;;
         *)
           usage

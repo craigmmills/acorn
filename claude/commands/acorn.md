@@ -6,7 +6,7 @@ Turns GitHub issues into agent-ready implementation specs via a multi-agent plan
 
 ```bash
 acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]  # Create spec from issue, start planning
-acorn list [repo]                                                    # List all specs and their status
+acorn list [repo] [--deps]                                           # List all specs and their status (optional dependency counts)
 acorn status [repo]                                                  # Show session dashboard
 acorn approve <repo> <slug>                                          # Approve a completed spec
 acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]        # Remove spec + kill session
@@ -14,6 +14,8 @@ acorn issue create <repo> <title> [options]                          # Create a 
 acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create issue + start spec immediately
 acorn issue clarify <repo> <issue-number>                            # Swap ai-drafted -> human-clarified
 acorn issue split <repo> <issue-number> [--yes] [--model <model>]    # Analyze issue and optionally create sub-issues
+acorn issue depends <repo> <issue#> [--blocked-by <issue#>[,<issue#>...]] [--remove-blocked-by <issue#>[,<issue#>...]]
+acorn deps graph <repo> <issue#> [<issue#>...]                        # Build wave execution plan from dependency graph
 ```
 
 ## Pipeline Modes
@@ -45,6 +47,7 @@ acorn issue split <repo> <issue-number> [--yes] [--model <model>]    # Analyze i
 - `--raw` — Skip the interactive template prompt
 - `--label <name>` — Add a label (repeatable)
 - `--assignee <login>` — Assign a user (repeatable)
+- `--blocked-by <issue#>[,<issue#>...]` — Add blocked-by dependencies after issue creation
 
 ### Structured issue template
 
@@ -104,6 +107,39 @@ Analyzes an existing GitHub issue and recommends whether it should be split into
 5. On acceptance, create sub-issues and post a summary comment on the parent
 
 If no split is recommended (or recommendation is invalid with fewer than 2 sub-issues), acorn leaves the original issue unchanged and prints next-step guidance to run `acorn create`.
+
+## Dependency Management
+
+### View dependencies
+```bash
+acorn issue depends <repo> <issue#>
+```
+
+### Add blocked-by relationships
+```bash
+acorn issue depends <repo> <issue#> --blocked-by <issue#>[,<issue#>...]
+```
+
+### Remove blocked-by relationships
+```bash
+acorn issue depends <repo> <issue#> --remove-blocked-by <issue#>[,<issue#>...]
+```
+
+### Create issue with dependencies
+```bash
+acorn issue create <repo> "title" --blocked-by 5,12
+acorn issue plan <repo> "title" --blocked-by 5,12
+```
+
+### View wave execution order
+```bash
+acorn deps graph <repo> <issue#> [<issue#>...]
+```
+
+### List with dependency info
+```bash
+acorn list [repo] --deps
+```
 
 ## Spec status values
 
