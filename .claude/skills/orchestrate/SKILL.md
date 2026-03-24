@@ -54,11 +54,23 @@ gh issue view <number> -R <owner>/<repo> --json number,title,body,labels,comment
 
 This is the critical step. You need to figure out which issues depend on which, so specs run in the right order — an issue's recon step should see the codebase as it will exist after its dependencies are implemented.
 
-### Check explicit references first
-Scan issue bodies and comments for dependency signals:
+### Check explicit dependencies first
+Use acorn's dependency management to query GitHub's blocked-by/blocking relationships:
+
+```bash
+# Check each issue for existing dependencies
+acorn issue depends <repo> <issue#>
+```
+
+Also scan issue bodies and comments for dependency signals:
 - "depends on #X", "blocked by #X", "after #X", "requires #X"
 - "blocks #Y", "prerequisite for #Y"
 - GitHub's own linked issues
+
+If you discover dependencies that aren't tracked yet, add them:
+```bash
+acorn issue depends <repo> <issue#> --blocked-by <other_issue#>
+```
 
 ### Then analyze for implicit dependencies
 Read all the issue bodies and think about what each issue touches in the codebase:
@@ -67,6 +79,15 @@ Read all the issue bodies and think about what each issue touches in the codebas
 - Does one issue change infrastructure (DB schema, auth, routing) that others build on?
 
 Build a dependency graph. If there are cycles, flag them to the user — cycles usually mean the issues need to be restructured.
+
+### Generate the wave execution plan
+Use `acorn deps graph` to compute wave ordering from the dependency graph:
+
+```bash
+acorn deps graph <repo> <issue#> [<issue#>...]
+```
+
+This outputs issues grouped into parallelizable waves based on their blocked-by relationships. If you need to adjust, you can also construct waves manually.
 
 ### Present as an ordered execution plan
 Group issues into **waves** — each wave contains issues that can run in parallel (no dependencies between them), and waves execute sequentially:

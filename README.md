@@ -251,7 +251,7 @@ This will:
 5. Set the issue label to `spec-in-progress`
 6. Post a comment on the issue with the spec location
 7. Start a detached tmux session with Claude Code
-8. Automatically trigger the planning pipeline after ~5 seconds
+8. Automatically trigger the planning pipeline once Claude Code is ready
 
 Monitor or attach anytime:
 
@@ -572,6 +572,7 @@ bash test/test_images.sh
 bash test/test_labels.sh
 bash test/test_auto_trigger.sh
 bash test/test_split.sh
+bash test/test_dependencies.sh
 
 # Run full suites including integration tests
 # (creates temporary GitHub issues, verifies image/label flows, cleans up)
@@ -600,4 +601,4 @@ Ensure tmux is installed (`brew install tmux`).
 `acorn create` is idempotent — it won't overwrite an existing PROMPT.md. To regenerate, clean first: `acorn clean <repo> <slug> --force --yes` then re-run create.
 
 **Auto-trigger doesn't fire**
-The auto-trigger sends the planning prompt to Claude Code via tmux after a ~5 second delay. If Claude Code hasn't finished initializing, attach to the session and send the trigger manually: say "let's draft this".
+The auto-trigger waits for Claude Code to be ready (polling for the prompt character) before sending the planning prompt via tmux. If it times out, attach to the session and send the trigger manually: say "let's draft this".

@@ -158,12 +158,26 @@ After creating, report the issue numbers and suggest next steps:
 
 ### Labels
 
-Add `ready-for-spec` by default (so they show up in batch orchestration):
+Acorn automatically adds the `triage` lifecycle label and `ai-drafted` clarification label when creating issues — you don't need to add labels manually.
+
 ```bash
-acorn issue create <repo> "<title>" --body "<body>" --label ready-for-spec
+# Just create the issue — labels are handled automatically
+acorn issue create <repo> "<title>" --body "<body>"
 ```
 
-If the issue was primarily AI-drafted (you wrote most of the content), acorn automatically adds the `ai-drafted` label. If the user provided most of the substance, suggest they run `acorn issue clarify <repo> <issue#>` to swap it to `human-clarified`.
+If the user provided most of the substance (not AI-drafted), suggest they run `acorn issue clarify <repo> <issue#>` to swap to `human-clarified` and transition the lifecycle from `triage` to `ready-for-spec`.
+
+### Dependencies
+
+If there are multiple issues and some depend on others, set up the dependencies:
+```bash
+acorn issue depends <repo> <issue#> --blocked-by <other_issue#>
+```
+
+You can also add dependencies at creation time:
+```bash
+acorn issue create <repo> "<title>" --body "<body>" --blocked-by <issue#>,<issue#>
+```
 
 ## Handling Common Situations
 

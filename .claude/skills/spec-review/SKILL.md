@@ -158,25 +158,30 @@ If the original conversation implied end-to-end ("spec and implement", "full pip
    acorn approve <repo> <slug>
    ```
 
-2. **Create the worktree:**
+2. **Set the lifecycle label to implementing:**
+   ```bash
+   acorn issue label <repo> <issue#> implementing
+   ```
+
+3. **Create the worktree:**
    ```bash
    dev wt <repo> <feature-branch>
    ```
    Use a branch name derived from the issue slug — e.g., if the slug is `add-auth-system`, use that as the branch name.
 
-3. **Start the implementation agent:**
+4. **Start the implementation agent:**
    ```bash
    dev <repo>/<feature-branch>/pi
    ```
 
-4. **Send the spec to the agent.** The spec lives in the main worktree, so tell the agent where to find it:
+5. **Send the spec to the agent.** The spec lives in the main worktree, so tell the agent where to find it:
    ```
    Read the implementation spec at ~/Projects/<repo>/main/.specs/<slug>/plans/SPEC.md and implement it.
    Follow the spec's architecture, file placement, and testing strategy.
    Commit your work as you go. When done, tell me it's ready for review.
    ```
 
-5. **Report to the user:**
+6. **Report to the user:**
    ```
    Spec approved and implementation started:
    - Worktree: ~/Projects/<repo>/<feature-branch>/
