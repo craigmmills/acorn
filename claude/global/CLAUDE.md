@@ -21,10 +21,12 @@ acorn list                                 # List all specs across all repos
 acorn list <repo>                          # List specs for a specific repo
 acorn status [repo]                        # Show session dashboard (running/dead/no-session)
 acorn approve <repo> <slug>               # Mark spec as approved for implementation
+acorn spec-complete <repo> <slug>         # Mark SPEC.md as ready for review
 acorn clean <repo> <slug> [--yes] [--force] # Kill session + delete spec (refuses if SPEC.md exists and issue open; --force overrides)
 acorn issue create <repo> <title> [--body <text>] [--raw] [--label <name>]... [--assignee <login>]...
 acorn issue plan <repo> <title> [options] [--lite | --quick]  # Create issue + immediately start spec generation
-acorn issue clarify <repo> <issue#>    # Mark issue as human-clarified (swap from ai-drafted)
+acorn issue clarify <repo> <issue#>       # Mark issue as human-clarified (triage -> ready-for-spec)
+acorn issue label <repo> <issue#> <label> # Manually set lifecycle label
 acorn issue split <repo> <issue#> [--yes] [--model <model>]  # Analyze issue for splitting into sub-issues
 ```
 
@@ -77,9 +79,9 @@ Encourage the user to clarify underspecified Job Story or Promise sections befor
     SPEC.md              # Stage 5: final implementation spec
 ```
 
-**Status values:** `planning` (agent working), `review` (SPEC.md ready), `approved` (greenlit for implementation), `unknown`
+**Status values:** Actual lifecycle label from GitHub (for example: `triage`, `spec-in-progress`, `implementing`, `done`). Fallback for unlabeled legacy issues: `planning`, `review`, `unknown`.
 
-**Label lifecycle:** `ready-for-spec` → `spec-in-progress` → `spec-review` → `spec-approved`
+**Label lifecycle:** `triage` → `ready-for-spec` → `spec-in-progress` → `spec-review` → `spec-approved` → `implementing` → `in-review` → `done`
 
 **Clarification labels:** `ai-drafted` → `human-clarified` (orthogonal to spec lifecycle)
 

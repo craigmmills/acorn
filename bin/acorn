@@ -7,7 +7,7 @@ PROJECTS_DIR="$HOME/projects"
 if [ -d "$HOME/Projects" ]; then
   PROJECTS_DIR="$HOME/Projects"
 fi
-LIFECYCLE_LABELS=("ready-for-spec" "spec-in-progress" "spec-review" "spec-approved")
+LIFECYCLE_LABELS=("triage" "ready-for-spec" "spec-in-progress" "spec-review" "spec-approved" "implementing" "in-review" "done")
 CLARIFICATION_LABELS=("ai-drafted" "human-clarified")
 auto_trigger_message() {
   local spec_path="$1"
@@ -30,16 +30,21 @@ Usage:
   acorn list [repo]
   acorn status [repo]
   acorn approve <repo> <slug>
+  acorn spec-complete <repo> <slug>
   acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
   acorn issue create <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]...
   acorn issue plan <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]... [--no-auto] [--lite | --quick]
   acorn issue clarify <repo> <issue-number>
+  acorn issue label <repo> <issue-number> <label>
   acorn issue split <repo> <issue-number> [--yes] [--model <model>]
 
 Pipeline modes:
   (default)   Full 6-stage pipeline — 14 agents, Opus recon + Opus planning
   --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus planning
   --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
+
+Lifecycle labels:
+  triage -> ready-for-spec -> spec-in-progress -> spec-review -> spec-approved -> implementing -> in-review -> done
 EOF
 }
 
@@ -141,17 +146,32 @@ gh_issue_json() {
 
 ensure_labels() {
   local repo_main="$1"
-  local label
+  local label color
+
+  # Lifecycle labels with distinct colors per stage
+  local lifecycle_colors
+  lifecycle_colors="triage:d73a4a"
+  lifecycle_colors="$lifecycle_colors ready-for-spec:0e8a16"
+  lifecycle_colors="$lifecycle_colors spec-in-progress:1d76db"
+  lifecycle_colors="$lifecycle_colors spec-review:fbca04"
+  lifecycle_colors="$lifecycle_colors spec-approved:0052cc"
+  lifecycle_colors="$lifecycle_colors implementing:5319e7"
+  lifecycle_colors="$lifecycle_colors in-review:f9d0c4"
+  lifecycle_colors="$lifecycle_colors done:cccccc"
+
   for label in "${LIFECYCLE_LABELS[@]}"; do
+    color="$(printf '%s' "$lifecycle_colors" | tr ' ' '\n' | grep "^${label}:" | cut -d: -f2)"
+    [ -n "$color" ] || color="0052cc"
     (
       cd "$repo_main"
-      gh label create "$label" --color "0052cc" --description "Acorn spec lifecycle" >/dev/null 2>&1
+      gh label create "$label" --color "$color" --description "Acorn lifecycle" --force >/dev/null 2>&1
     ) || true
   done
+
   for label in "${CLARIFICATION_LABELS[@]}"; do
     (
       cd "$repo_main"
-      gh label create "$label" --color "e4e669" --description "Acorn clarification status" >/dev/null 2>&1
+      gh label create "$label" --color "e4e669" --description "Acorn clarification status" --force >/dev/null 2>&1
     ) || true
   done
 }
@@ -1520,11 +1540,6 @@ status_for_spec() {
   local issue_number="$2"
   local spec_path="$3"
 
-  local prompt_exists=0
-  local final_exists=0
-  [ -f "$spec_path/PROMPT.md" ] && prompt_exists=1
-  [ -f "$spec_path/plans/SPEC.md" ] && final_exists=1
-
   local labels_json='[]'
   if [ -n "$issue_number" ]; then
     labels_json="$(
@@ -1533,27 +1548,31 @@ status_for_spec() {
     )" || true
   fi
 
-  local has_approved=0
-  local has_in_progress=0
-  if printf '%s' "$labels_json" | jq -e '.[] | select(.name == "spec-approved")' >/dev/null 2>&1; then
-    has_approved=1
-  fi
-  if printf '%s' "$labels_json" | jq -e '.[] | select(.name == "spec-in-progress")' >/dev/null 2>&1; then
-    has_in_progress=1
-  fi
+  # Return the actual lifecycle label if present.
+  local label found=""
+  for label in "${LIFECYCLE_LABELS[@]}"; do
+    if printf '%s' "$labels_json" | jq -e --arg l "$label" '.[] | select(.name == $l)' >/dev/null 2>&1; then
+      found="$label"
+      break
+    fi
+  done
 
-  if [ "$has_approved" -eq 1 ]; then
-    printf 'approved'
-  elif [ "$final_exists" -eq 1 ]; then
-    printf 'review'
-  elif [ "$has_in_progress" -eq 1 ] || [ "$prompt_exists" -eq 1 ]; then
-    printf 'planning'
+  if [ -n "$found" ]; then
+    printf '%s' "$found"
   else
-    printf 'unknown'
-  fi
+    # Backward-compatible fallback for older unlabeled issues.
+    local final_exists=0
+    local prompt_exists=0
+    [ -f "$spec_path/plans/SPEC.md" ] && final_exists=1
+    [ -f "$spec_path/PROMPT.md" ] && prompt_exists=1
 
-  if [ "$has_approved" -eq 1 ] && [ "$final_exists" -eq 0 ]; then
-    warn "Drift: approved label present but missing plans/SPEC.md at $spec_path"
+    if [ "$final_exists" -eq 1 ]; then
+      printf 'review'
+    elif [ "$prompt_exists" -eq 1 ]; then
+      printf 'planning'
+    else
+      printf 'unknown'
+    fi
   fi
 }
 
@@ -1579,7 +1598,7 @@ clarification_for_issue() {
 }
 
 print_list_header() {
-  printf '%-16s %-8s %-40s %-10s %-6s %-8s %-11s %s\n' "repo" "issue" "slug" "status" "mode" "age" "clarify" "spec_path"
+  printf '%-16s %-8s %-40s %-18s %-6s %-8s %-11s %s\n' "repo" "issue" "slug" "status" "mode" "age" "clarify" "spec_path"
 }
 
 print_list_row() {
@@ -1591,11 +1610,11 @@ print_list_row() {
   local age="$6"
   local clarify="$7"
   local path="$8"
-  printf '%-16s %-8s %-40s %-10s %-6s %-8s %-11s %s\n' "$repo" "$issue" "$slug" "$status" "$mode" "$age" "$clarify" "$path"
+  printf '%-16s %-8s %-40s %-18s %-6s %-8s %-11s %s\n' "$repo" "$issue" "$slug" "$status" "$mode" "$age" "$clarify" "$path"
 }
 
 print_status_header() {
-  printf '%-16s %-42s %-12s %-8s %-10s %s\n' \
+  printf '%-16s %-42s %-12s %-8s %-18s %s\n' \
     "REPO" "SLUG" "SESSION" "BACKEND" "STATUS" "ATTACH"
 }
 
@@ -1606,7 +1625,7 @@ print_status_row() {
   local backend="$4"
   local status="$5"
   local attach="$6"
-  printf '%-16s %-42s %-12s %-8s %-10s %s\n' \
+  printf '%-16s %-42s %-12s %-8s %-18s %s\n' \
     "$repo" "$slug" "$session" "$backend" "$status" "$attach"
 }
 
@@ -1873,6 +1892,30 @@ cmd_approve() {
   comment_issue "$repo_main" "$issue_number" "Spec approved for implementation: $dir/plans/SPEC.md"
 
   echo "Approved $slug (issue #$issue_number)"
+}
+
+cmd_spec_complete() {
+  local repo="$1"
+  local slug="$2"
+
+  require_cmds gh jq
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+  local dir
+  dir="$(spec_dir "$repo" "$slug")"
+
+  [ -d "$dir" ] || die "Spec directory missing: $dir"
+  [ -f "$dir/plans/SPEC.md" ] || die "Missing final plan: $dir/plans/SPEC.md"
+
+  local issue_number
+  issue_number="$(issue_number_from_slug "$slug")"
+  [ -n "$issue_number" ] || die "Cannot infer issue number from slug: $slug"
+
+  ensure_labels "$repo_main"
+  set_issue_state_label "$repo_main" "$issue_number" "spec-review"
+  comment_issue "$repo_main" "$issue_number" "Spec ready for review: $dir/plans/SPEC.md"
+
+  echo "Marked $slug (issue #$issue_number) as spec-review"
 }
 
 cmd_clean() {
@@ -2307,14 +2350,59 @@ cmd_issue_clarify() {
   local repo="$1"
   local issue_number="$2"
 
-  require_cmds gh
+  require_cmds gh jq
   local repo_main
   repo_main="$(safe_repo_main "$repo")"
 
   ensure_labels "$repo_main"
-  set_clarification_label "$repo_main" "$issue_number" "human-clarified"
 
-  echo "Marked issue #$issue_number in $repo as human-clarified"
+  # Transition lifecycle only when still at triage (or unset).
+  local labels_json current_lifecycle="" label
+  labels_json="$(
+    cd "$repo_main"
+    gh issue view "$issue_number" --json labels 2>/dev/null | jq -c '.labels // []'
+  )" || labels_json='[]'
+
+  for label in "${LIFECYCLE_LABELS[@]}"; do
+    if printf '%s' "$labels_json" | jq -e --arg l "$label" '.[] | select(.name == $l)' >/dev/null 2>&1; then
+      current_lifecycle="$label"
+      break
+    fi
+  done
+
+  if [ -z "$current_lifecycle" ] || [ "$current_lifecycle" = "triage" ]; then
+    set_issue_state_label "$repo_main" "$issue_number" "ready-for-spec"
+    echo "Marked issue #$issue_number in $repo as human-clarified and ready-for-spec"
+  else
+    echo "Marked issue #$issue_number in $repo as human-clarified (lifecycle unchanged: $current_lifecycle)"
+  fi
+
+  set_clarification_label "$repo_main" "$issue_number" "human-clarified"
+}
+
+cmd_issue_label() {
+  local repo="$1"
+  local issue_number="$2"
+  local target="$3"
+
+  require_cmds gh
+  local repo_main
+  repo_main="$(safe_repo_main "$repo")"
+
+  local valid=0
+  local label
+  for label in "${LIFECYCLE_LABELS[@]}"; do
+    if [ "$label" = "$target" ]; then
+      valid=1
+      break
+    fi
+  done
+  [ "$valid" -eq 1 ] || die "Unknown lifecycle label: $target (valid: ${LIFECYCLE_LABELS[*]})"
+
+  ensure_labels "$repo_main"
+  set_issue_state_label "$repo_main" "$issue_number" "$target"
+
+  echo "Set issue #$issue_number in $repo to '$target'"
 }
 
 # Analyze an issue and recommend whether it should be split into sub-issues.
@@ -2476,6 +2564,7 @@ cmd_issue_create() {
   local repo_main
   repo_main="$(safe_repo_main "$repo")"
   ensure_labels "$repo_main"
+  set_issue_state_label "$repo_main" "$issue_num" "triage"
   set_clarification_label "$repo_main" "$issue_num" "ai-drafted"
 
   echo "Created issue in $repo"
@@ -2578,6 +2667,10 @@ main() {
       [ "$#" -eq 3 ] || { usage; exit 1; }
       cmd_approve "$2" "$3"
       ;;
+    spec-complete)
+      [ "$#" -eq 3 ] || { usage; exit 1; }
+      cmd_spec_complete "$2" "$3"
+      ;;
     clean)
       [ "$#" -ge 3 ] || { usage; exit 1; }
       repo="$2"
@@ -2609,6 +2702,14 @@ main() {
           local _cl_issue="$4"
           shift 4
           cmd_issue_clarify "$repo" "$_cl_issue"
+          ;;
+        label)
+          [ "$#" -ge 5 ] || { usage; exit 1; }
+          repo="$3"
+          local _lb_issue="$4"
+          local _lb_label="$5"
+          shift 5
+          cmd_issue_label "$repo" "$_lb_issue" "$_lb_label"
           ;;
         split)
           [ "$#" -ge 4 ] || { usage; exit 1; }

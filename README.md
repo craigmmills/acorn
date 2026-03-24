@@ -64,6 +64,7 @@ acorn create <repo> <issue#> [--lite | --quick]
     |-- Generates PROMPT.md with requirements + planning methodology
     |   (image URLs rewritten to local paths for agent visibility)
     |-- Sets GitHub label: spec-in-progress
+    |-- (Issues created via `acorn issue create` start at `triage`)
     |-- Starts a detached Claude Code session in tmux
     |
     v
@@ -278,10 +279,11 @@ acorn list myapp
 Output shows repo, issue number, slug, status, mode, age, clarification status, and path.
 
 **Status values:**
-- `planning` — PROMPT.md exists, agent is working
-- `review` — plans/SPEC.md exists, ready for human review
-- `approved` — spec has been approved for implementation
-- `unknown` — spec directory exists but state is unclear
+- Actual lifecycle label from GitHub when present (`triage`, `ready-for-spec`, `spec-in-progress`, `spec-review`, `spec-approved`, `implementing`, `in-review`, `done`)
+- Legacy fallback for unlabeled issues:
+  - `planning` — PROMPT.md exists, agent is working
+  - `review` — plans/SPEC.md exists, ready for human review
+  - `unknown` — spec directory exists but state is unclear
 
 ### Session dashboard
 
@@ -301,8 +303,18 @@ Output columns:
 | SLUG | Issue slug (e.g., `42-add-authentication`) |
 | SESSION | `running` or `dead` |
 | BACKEND | `tmux` or `dev` |
-| STATUS | Spec status (`planning`, `review`, `approved`) |
+| STATUS | Lifecycle status label (or legacy fallback: `planning`/`review`/`unknown`) |
 | ATTACH | Command to attach to a running session |
+
+### Mark a spec as ready for review
+
+After the planning pipeline has produced `plans/SPEC.md`:
+
+```bash
+acorn spec-complete myapp 42-add-authentication
+```
+
+This sets the GitHub label to `spec-review` and posts a review-ready comment.
 
 ### Approve a spec
 
@@ -398,10 +410,20 @@ This combines `issue create` + `create` — it creates the GitHub issue and imme
 
 ```bash
 acorn issue clarify myapp 42
-# Output: Marked issue #42 in myapp as human-clarified
+# Output: Marked issue #42 in myapp as human-clarified and ready-for-spec
 ```
 
-This swaps the clarification label from `ai-drafted` to `human-clarified` (or sets `human-clarified` if no clarification label is present).
+This swaps the clarification label from `ai-drafted` to `human-clarified` and transitions lifecycle from `triage` to `ready-for-spec` (without regressing issues already further along).
+
+### Manually set lifecycle label
+
+```bash
+acorn issue label myapp 42 implementing
+acorn issue label myapp 42 in-review
+acorn issue label myapp 42 done
+```
+
+Use this when work advances outside the spec pipeline and you want labels to reflect actual state.
 
 ### Split an issue into sub-issues
 
@@ -434,10 +456,14 @@ Acorn manages these labels automatically (creates them if they don't exist):
 
 | Label | Set By | Meaning |
 |-------|--------|---------|
-| `ready-for-spec` | Manual | Issue is ready for spec creation |
+| `triage` | `acorn issue create` | New issue awaiting clarification |
+| `ready-for-spec` | `acorn issue clarify` | Clarified and ready for spec work |
 | `spec-in-progress` | `acorn create` | Planning pipeline is running |
-| `spec-review` | Manual | Spec is ready for review |
+| `spec-review` | `acorn spec-complete` / `acorn issue label` | Spec is ready for review |
 | `spec-approved` | `acorn approve` | Spec approved for implementation |
+| `implementing` | `acorn issue label` | Implementation in progress |
+| `in-review` | `acorn issue label` | Implementation/PR review in progress |
+| `done` | `acorn issue label` | Work complete |
 
 ### Clarification Labels
 
@@ -514,6 +540,9 @@ acorn status [repo]
 acorn approve <repo> <slug>
     Approve a completed spec for implementation
 
+acorn spec-complete <repo> <slug>
+    Mark a completed SPEC.md as ready for review (`spec-review`)
+
 acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
     Remove a spec directory and kill its session (refuses if SPEC.md exists and issue is open; use --force to override)
 
@@ -524,7 +553,10 @@ acorn issue plan <repo> <title> [options] [--no-auto] [--lite | --quick]
     Create a GitHub issue and immediately start spec creation
 
 acorn issue clarify <repo> <issue-number>
-    Mark an issue as human-clarified (swap from ai-drafted)
+    Mark an issue as human-clarified (and move triage -> ready-for-spec when applicable)
+
+acorn issue label <repo> <issue-number> <label>
+    Manually set lifecycle label (`triage`, `ready-for-spec`, `spec-in-progress`, `spec-review`, `spec-approved`, `implementing`, `in-review`, `done`)
 
 acorn issue split <repo> <issue-number> [--yes] [--model <model>]
     Analyze an issue and recommend splitting into sub-issues
