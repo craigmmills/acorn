@@ -9,10 +9,12 @@ acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]  # Create spec
 acorn list [repo] [--deps]                                           # List all specs and their status (optional dependency counts)
 acorn status [repo]                                                  # Show session dashboard
 acorn approve <repo> <slug>                                          # Approve a completed spec
+acorn spec-complete <repo> <slug>                                    # Mark SPEC.md as ready for review
 acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]        # Remove spec + kill session
 acorn issue create <repo> <title> [options]                          # Create a GitHub issue (interactive template)
 acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create issue + start spec immediately
-acorn issue clarify <repo> <issue-number>                            # Swap ai-drafted -> human-clarified
+acorn issue clarify <repo> <issue-number>                            # Swap ai-drafted -> human-clarified, triage -> ready-for-spec
+acorn issue label <repo> <issue-number> <label>                      # Manually set lifecycle label
 acorn issue split <repo> <issue-number> [--yes] [--model <model>]    # Analyze issue and optionally create sub-issues
 acorn issue depends <repo> <issue#> [--blocked-by <issue#>[,<issue#>...]] [--remove-blocked-by <issue#>[,<issue#>...]]
 acorn deps graph <repo> <issue#> [<issue#>...]                        # Build wave execution plan from dependency graph
@@ -30,8 +32,8 @@ acorn deps graph <repo> <issue#> [<issue#>...]                        # Build wa
 
 1. **Start spec**: `acorn create <repo> <issue#> [--lite | --quick]` — fetches the issue, generates PROMPT.md, launches Claude Code in a detached tmux session, and auto-triggers the planning pipeline.
 2. **Monitor**: `tmux attach -t <session>` to watch progress.
-3. **Review**: When status shows `review`, read `plans/SPEC.md` in the spec directory.
-4. **Approve**: `acorn approve <repo> <slug>` — sets the `spec-approved` label on the issue.
+3. **Mark ready for review**: `acorn spec-complete <repo> <slug>` — sets `spec-review` after `plans/SPEC.md` is ready.
+4. **Review/Approve**: Review `plans/SPEC.md`, then run `acorn approve <repo> <slug>` to set `spec-approved`.
 5. **Clean up**: `acorn clean <repo> <slug> --yes` — kills session and removes spec directory. **Safety:** refuses to delete if SPEC.md exists and the issue is still open (use `--force` to override).
 
 ## Options for create / issue plan
@@ -89,7 +91,12 @@ Ask the user for clarification when Job Story or Promise sections feel underspec
 
 ## `acorn issue clarify <repo> <issue-number>`
 
-Swaps the `ai-drafted` label to `human-clarified` on the specified issue. Ensures labels exist in the repo first.
+Swaps `ai-drafted` to `human-clarified` and transitions lifecycle `triage` → `ready-for-spec` when the issue is still at triage (or unlabeled). If already beyond triage, lifecycle is left unchanged.
+
+## `acorn issue label <repo> <issue-number> <label>`
+
+Manual lifecycle override for any valid lifecycle label:
+`triage`, `ready-for-spec`, `spec-in-progress`, `spec-review`, `spec-approved`, `implementing`, `in-review`, `done`.
 
 ## `acorn issue split <repo> <issue-number> [--yes] [--model <model>]`
 
@@ -145,9 +152,10 @@ acorn list [repo] --deps
 
 | Status | Meaning |
 |--------|---------|
-| `planning` | PROMPT.md exists, agent is working |
-| `review` | plans/SPEC.md exists, ready for human review |
-| `approved` | Spec has been approved for implementation |
+| lifecycle label | Actual GitHub lifecycle label (`triage`, `ready-for-spec`, `spec-in-progress`, `spec-review`, `spec-approved`, `implementing`, `in-review`, `done`) |
+| `planning` | Legacy fallback: PROMPT.md exists and no lifecycle label found |
+| `review` | Legacy fallback: plans/SPEC.md exists and no lifecycle label found |
+| `unknown` | Legacy fallback: no lifecycle label + no local state signal |
 
 ## Session dashboard
 
@@ -159,7 +167,7 @@ acorn list [repo] --deps
 | SLUG | Spec slug (truncated to 40 chars) |
 | SESSION | `running` / `dead` / `no-session` |
 | BACKEND | Session backend from meta.json (`tmux`, `pi`) |
-| STATUS | Pipeline status (`planning` / `review` / `approved`) |
+| STATUS | Lifecycle label (or legacy fallback `planning` / `review` / `unknown`) |
 | ATTACH | `tmux attach -t <session>` command (if running) |
 
 ## Pipeline stages by mode
@@ -226,8 +234,14 @@ Issues with screenshots, mockups, or diagrams are automatically handled:
 
 | Label | Set By | Meaning |
 |-------|--------|---------|
+| `triage` | `acorn issue create` | New issue awaiting clarification |
+| `ready-for-spec` | `acorn issue clarify` | Clarified and ready for spec creation |
 | `spec-in-progress` | `acorn create` | Planning pipeline is running |
+| `spec-review` | `acorn spec-complete` / `acorn issue label` | Spec is ready for review |
 | `spec-approved` | `acorn approve` | Spec approved for implementation |
+| `implementing` | `acorn issue label` | Implementation in progress |
+| `in-review` | `acorn issue label` | Implementation/PR review in progress |
+| `done` | `acorn issue label` | Work complete |
 | `ai-drafted` | `acorn issue create`, `acorn issue plan` | Issue drafted by AI |
 | `human-clarified` | `acorn issue clarify` | Issue clarified by a human |
 

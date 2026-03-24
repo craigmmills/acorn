@@ -129,6 +129,7 @@ test_cmd_issue_create_blocked_by() {
   create_issue_in_repo() { echo -e "77\nhttps://example/issues/77"; }
   safe_repo_main() { echo "/tmp/repo"; }
   ensure_labels() { :; }
+  set_issue_state_label() { :; }
   set_clarification_label() { :; }
 
   local seen_file
@@ -152,6 +153,7 @@ test_cmd_issue_plan_blocked_by_and_flags() {
   create_issue_in_repo() { echo -e "88\nhttps://example/issues/88"; }
   safe_repo_main() { echo "/tmp/repo"; }
   ensure_labels() { :; }
+  set_issue_state_label() { :; }
   set_clarification_label() { :; }
   local seen_dep=""
   add_blocked_by_bulk() { seen_dep="$1|$2|$3|$4"; }
