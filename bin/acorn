@@ -158,7 +158,7 @@ panel_raw() {
     full:redteam:2)                    printf 'opus' ;;
     full:redteam:3)                    printf 'sonnet' ;;
     full:redteam:4)                    printf 'fable' ;;
-    full:spec)                         printf 'opus' ;;
+    full:spec)                         printf 'fable' ;;
     lite:draft)                        printf 'opus' ;;
     lite:validate)                     printf 'sonnet' ;;
     lite:spec)                         printf 'opus' ;;
