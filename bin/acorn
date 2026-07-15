@@ -446,6 +446,11 @@ build_dependency_graph() {
 # Reads dependency pairs from stdin ("ISSUE BLOCKER" or "ISSUE NONE").
 # Outputs waves separated by "---" lines.
 topological_sort_waves() {
+  # Space-join the issue/wave lists and split them with a space-only IFS.
+  # The global IFS is $'\n\t' (space removed on purpose), so `for x in $list`
+  # would otherwise treat "1 2 3" as a single token and collapse every issue
+  # into one wave. `local IFS` keeps this scoped and never leaks to the caller.
+  local IFS=' '
   local all_issues=""
   local edges=""
 
@@ -484,7 +489,7 @@ topological_sort_waves() {
           esac
         fi
       done
-      IFS=$'\n\t'
+      IFS=' '
       if [ "$is_blocked" -eq 0 ]; then
         wave_issues="$wave_issues $candidate"
       fi
@@ -535,7 +540,7 @@ planning_block_full() {
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
 >
 > When the user says "let's draft this" (or any variation like "draft it", "start planning", "go", etc.),
-> you MUST execute the 5-stage multi-agent pipeline described below.
+> you MUST execute the 6-stage multi-agent pipeline described below.
 >
 > **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
 >
@@ -557,7 +562,7 @@ planning_block_full() {
 
 ### Overview
 
-You MUST execute these 5 stages in order. Each stage MUST use the Task tool to launch sub-agents.
+You MUST execute these 6 stages in order. Each stage MUST use the Task tool to launch sub-agents.
 You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the work yourself.
 
 0. **Stage 0**: YOU launch 3 parallel Task agents → each explores the codebase from a different angle
@@ -567,7 +572,7 @@ You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the wo
 4. **Stage 4**: YOU launch 4 parallel Task agents → each adversarially red-teams the master plan
 5. **Stage 5**: YOU launch 1 Task agent → produces final SPEC.md with traceability
 
-Total: 13 Task agent launches across 5 stages (Stage 0 through Stage 5). No shortcuts.
+Total: 14 Task agent launches across 6 stages (Stage 0 through Stage 5). No shortcuts.
 
 ---
 
@@ -979,7 +984,7 @@ The spec must be ready to be handed to a developer or agent for implementation w
 - You need ~1k tokens per stage. If your context grows beyond ~20k tokens, you broke a rule.
 - NEVER read sub-agent output files yourself (the ONLY exception: __SPEC_PATH__/plans/SPEC.md at the very end)
 - NEVER consume sub-agent return messages beyond confirming the word "Done"
-- NEVER write plan content yourself — that's what the 13 sub-agents are for
+- NEVER write plan content yourself — that's what the 14 sub-agents are for
 - If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
 METHODOLOGY_EOF
 }
@@ -992,7 +997,7 @@ planning_block_lite() {
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
 >
 > When the user says "let's draft this" (or any variation like "draft it", "start planning", "go", etc.),
-> you MUST execute the 3-stage lite pipeline described below.
+> you MUST execute the 4-stage lite pipeline described below.
 >
 > **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
 >
@@ -1673,10 +1678,13 @@ wait_for_claude_ready() {
   while [ "$elapsed" -lt "$max_wait" ]; do
     local pane_content
     pane_content="$(tmux capture-pane -t "$session_name" -ep 2>/dev/null || true)"
-    # Strip any residual ANSI escape codes
-    pane_content="$(printf '%s' "$pane_content" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g')"
-    # Check the last few lines for Claude Code's prompt
-    if printf '%s' "$pane_content" | tail -n5 | grep -qE '>\s*$'; then
+    # Strip any residual ANSI escape codes. Use an ANSI-C-quoted literal ESC
+    # ($'\x1b') so BSD/macOS sed (which doesn't interpret \x1b) sees a real
+    # escape byte, not the four characters backslash-x-1-b.
+    pane_content="$(printf '%s' "$pane_content" | sed $'s/\x1b\\[[0-9;]*[a-zA-Z]//g')"
+    # Check the last few lines for Claude Code's prompt. Use the POSIX
+    # [[:space:]] class rather than the GNU-only \s so this matches on BSD grep.
+    if printf '%s' "$pane_content" | tail -n5 | grep -qE '>[[:space:]]*$'; then
       return 0
     fi
     sleep "$interval"
@@ -2482,7 +2490,9 @@ analyze_issue_for_split() {
   local issue_title="$1"
   local issue_body="$2"
   local issue_comments="${3:-}"
-  local model="${4:-claude-sonnet-4-5}"
+  # `sonnet` is an alias that resolves to the latest Sonnet; avoids pinning a
+  # generation-stale full ID. Override per-call with `acorn issue split --model`.
+  local model="${4:-sonnet}"
 
   local prompt
   prompt="$(cat <<'SPLIT_PROMPT_EOF'
@@ -2781,7 +2791,7 @@ cmd_issue_split() {
   shift 2
 
   local yes=0
-  local model="claude-sonnet-4-5"
+  local model="sonnet"
 
   while [ "$#" -gt 0 ]; do
     case "$1" in

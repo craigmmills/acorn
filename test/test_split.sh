@@ -334,7 +334,7 @@ These are three independent pieces of work that can be implemented separately.")
     body="$(printf '%s' "$issue_json" | jq -r '.body')"
 
     local analysis
-    analysis="$(analyze_issue_for_split "$title" "$body" "" "claude-sonnet-4-5")"
+    analysis="$(analyze_issue_for_split "$title" "$body" "" "sonnet")"
 
     local should_split
     should_split="$(printf '%s' "$analysis" | jq -r '.should_split')"

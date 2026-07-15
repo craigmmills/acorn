@@ -301,8 +301,8 @@ Output columns:
 |--------|-------------|
 | REPO | Repository name |
 | SLUG | Issue slug (e.g., `42-add-authentication`) |
-| SESSION | `running` or `dead` |
-| BACKEND | `tmux` or `dev` |
+| SESSION | `running`, `dead`, or `no-session` |
+| BACKEND | Always `tmux` (the only session backend acorn creates) |
 | STATUS | Lifecycle status label (or legacy fallback: `planning`/`review`/`unknown`) |
 | ATTACH | Command to attach to a running session |
 
@@ -440,14 +440,14 @@ Uses AI analysis (Claude Sonnet by default) to evaluate whether an issue should 
 
 Options:
 - `--yes` — Skip confirmation prompt and create sub-issues automatically
-- `--model <model>` — Override the AI model used for analysis (default: `claude-sonnet-4-5`)
+- `--model <model>` — Override the AI model used for analysis (default: `sonnet`). Accepts a model alias (`fable`, `sonnet`, `opus`) or a full model name.
 
 ```bash
 # Auto-confirm sub-issue creation
 acorn issue split myapp 42 --yes
 
 # Use a different model for analysis
-acorn issue split myapp 42 --model claude-opus-4-6
+acorn issue split myapp 42 --model opus
 ```
 
 ## GitHub Label Lifecycle
@@ -561,7 +561,7 @@ acorn issue label <repo> <issue-number> <label>
 acorn issue split <repo> <issue-number> [--yes] [--model <model>]
     Analyze an issue and recommend splitting into sub-issues
     --yes       Skip confirmation and create sub-issues automatically
-    --model     Override the AI model for analysis (default: claude-sonnet-4-5)
+    --model     Override the AI model for analysis (default: sonnet)
 ```
 
 ## Testing

@@ -48,7 +48,7 @@ gh issue view <number> -R <owner>/<repo> --json number,title,body,labels,comment
 
 **If no issues are found**, tell the user and stop. Don't guess or suggest creating issues — that's a separate workflow.
 
-**Skip issues that already have specs in progress.** Check `acorn list <repo>` first — if an issue already has a spec with status `planning` or `review`, mention it to the user and exclude it from the batch unless they explicitly ask to re-spec it (which means cleaning and re-creating).
+**Skip issues that already have specs in progress.** Check `acorn list <repo>` first — if an issue already has a spec (status `spec-in-progress`, `spec-review`, or `spec-approved`, or the legacy fallback `planning`/`review`), mention it to the user and exclude it from the batch unless they explicitly ask to re-spec it (which means cleaning and re-creating).
 
 ## Step 2: Analyze Dependencies & Determine Order
 
@@ -171,7 +171,7 @@ ls ~/Projects/<repo>/main/.specs/<slug>/recon/
 ls ~/Projects/<repo>/main/.specs/<slug>/plans/SPEC.md
 ```
 
-When a session's status shows `review`, that spec is ready. When all specs in a wave are done, report the wave as complete and start the next wave.
+A spec is ready when `plans/SPEC.md` has landed (the `ls` check above). Do NOT wait for the status to read `review` — `acorn create` stamps the issue `spec-in-progress` and nothing auto-advances it, so a finished spec sits at `spec-in-progress` until a human runs `acorn spec-complete` (which moves it to `spec-review`). Treat the presence of `plans/SPEC.md`, or a `spec-review`/`spec-approved` label, as the done signal. When all specs in a wave are done, report the wave as complete and start the next wave.
 
 If a session dies or gets stuck, tell the user and suggest options:
 - Re-run with `acorn clean <repo> <slug> --yes && acorn create <repo> <issue#> [--mode]`

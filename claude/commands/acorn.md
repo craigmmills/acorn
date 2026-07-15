@@ -104,7 +104,7 @@ Analyzes an existing GitHub issue and recommends whether it should be split into
 
 **Options:**
 - `--yes` — Auto-accept split recommendations and skip confirmation prompt
-- `--model <model>` — Override the analysis model (default: `claude-sonnet-4-5`)
+- `--model <model>` — Override the analysis model (default: `sonnet`; accepts `fable`/`sonnet`/`opus` or a full model name)
 
 **Flow:**
 1. Fetch issue title/body/comments from GitHub
@@ -166,7 +166,7 @@ acorn list [repo] --deps
 | REPO | Repository name |
 | SLUG | Spec slug (truncated to 40 chars) |
 | SESSION | `running` / `dead` / `no-session` |
-| BACKEND | Session backend from meta.json (`tmux`, `pi`) |
+| BACKEND | Session backend from meta.json (always `tmux`) |
 | STATUS | Lifecycle label (or legacy fallback `planning` / `review` / `unknown`) |
 | ATTACH | `tmux attach -t <session>` command (if running) |
 
