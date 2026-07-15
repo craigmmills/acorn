@@ -58,8 +58,9 @@ Encourage the user to clarify underspecified Job Story or Promise sections befor
 2. A detached Claude Code session launches in tmux and auto-triggers planning
 3. The orchestrator agent runs the pipeline (mode-dependent):
    - **Full**: 3 recon → 4 drafts → 1 evaluation → 1 synthesis → 4 red team → 1 final spec
-   - **Lite**: 3 recon (Sonnet) → 1 draft → 1 validation → 1 final spec
-   - **Quick**: 3 recon (Sonnet) → 1 direct spec
+   - **Lite**: 3 recon → 1 draft → 1 validation → 1 final spec
+   - **Quick**: 3 recon → 1 direct spec
+   - Per-stage models come from a configurable panel (recon → Fable, synthesis/spec → Opus, drafters/red-team spread across Opus/Sonnet/Fable). Override any stage with `ACORN_PANEL_<key>`.
 4. Output lands in `.specs/<slug>/plans/SPEC.md`
 
 **Spec directory layout:**

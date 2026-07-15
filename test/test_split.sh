@@ -100,10 +100,12 @@ test_format_recommendation_no_split() {
 test_analyze_raw_json() {
   printf '\n\033[1m== analyze_issue_for_split (raw JSON) ==\033[0m\n'
 
+  # run_agent calls `claude -p --output-format json`, so the stub emits the
+  # envelope with the split JSON as the `.result` string.
   claude() {
-    cat <<'MOCK_EOF'
-{"should_split":true,"reasoning":"test reason","sub_issues":[{"title":"A","scope":"scope A"}]}
-MOCK_EOF
+    cat >/dev/null
+    local inner='{"should_split":true,"reasoning":"test reason","sub_issues":[{"title":"A","scope":"scope A"}]}'
+    jq -cn --arg r "$inner" '{type:"result",result:$r}'
   }
   export -f claude
 
@@ -127,13 +129,13 @@ MOCK_EOF
 test_analyze_fenced_json() {
   printf '\n\033[1m== analyze_issue_for_split (fenced JSON) ==\033[0m\n'
 
+  # Model wraps its JSON in a markdown fence inside the envelope's .result;
+  # extract_json must still recover it.
   claude() {
-    cat <<'MOCK_EOF'
-Here is my analysis:
-```json
-{"should_split":false,"reasoning":"focused issue","sub_issues":[]}
-```
-MOCK_EOF
+    cat >/dev/null
+    local inner
+    inner=$'Here is my analysis:\n```json\n{"should_split":false,"reasoning":"focused issue","sub_issues":[]}\n```'
+    jq -cn --arg r "$inner" '{type:"result",result:$r}'
   }
   export -f claude
 
@@ -153,8 +155,10 @@ MOCK_EOF
 test_analyze_invalid_json() {
   printf '\n\033[1m== analyze_issue_for_split (invalid JSON) ==\033[0m\n'
 
+  # Non-JSON prose in .result must fail structured extraction and die.
   claude() {
-    echo "I think this issue is fine as-is."
+    cat >/dev/null
+    jq -cn --arg r "I think this issue is fine as-is." '{type:"result",result:$r}'
   }
   export -f claude
 

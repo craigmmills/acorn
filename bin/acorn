@@ -42,10 +42,10 @@ Usage:
   acorn issue depends <repo> <issue#> [--blocked-by <issue#>[,<issue#>...]] [--remove-blocked-by <issue#>[,<issue#>...]]
   acorn deps graph <repo> <issue#> [<issue#>...]
 
-Pipeline modes:
-  (default)   Full 6-stage pipeline — 14 agents, Opus recon + Opus planning
-  --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus planning
-  --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
+Pipeline modes (per-stage models come from the panel; see README "Model panel"):
+  (default)   Full 6-stage pipeline — 14 agents, Fable recon + mixed planning
+  --lite      Lite 4-stage pipeline — 6 agents, Fable recon + Opus planning
+  --quick     Quick 2-stage pipeline — 4 agents, Fable recon + Opus direct spec
 
 Dependency management:
   acorn issue depends <repo> <issue#>                       Show dependencies
@@ -68,6 +68,208 @@ require_cmds() {
   done
   if [ "${#missing[@]}" -gt 0 ]; then
     die "Missing required command(s): ${missing[*]}"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Model panel + dispatcher
+#
+# `panel_model <key>` is the single source of truth for which model runs each
+# pipeline stage (replaces per-stage model names hardcoded in prose).
+# `run_agent` is the only place that knows how to actually call a model: it
+# routes Claude tiers (fable/sonnet/opus/haiku/claude-*) to `claude -p` and
+# GPT/Codex models (gpt-*/codex/spark) to `codex exec`.
+#
+# Codex is a SOFT dependency. If it is absent or unauthed, codex models degrade
+# to a Claude fallback (ACORN_CODEX_FALLBACK, default "opus") with a warning,
+# unless ACORN_STRICT_PANEL=1, which turns degradation into a hard error.
+# Force Codex on/off for tests/CI with ACORN_CODEX=1 / ACORN_CODEX=0.
+# Override any stage with ACORN_PANEL_<key> (":"/"-" become "_"), e.g.
+# ACORN_PANEL_full_recon=haiku.
+# ---------------------------------------------------------------------------
+
+# Classify a model name into a backend family.
+model_family() {
+  case "$1" in
+    gpt-*|o3|o3-*|o4-*|codex|codex-*|spark) printf 'codex' ;;
+    *)                                       printf 'claude' ;;
+  esac
+}
+
+# Is Codex usable? Cached after first probe. ACORN_CODEX=0/1 forces the answer.
+_ACORN_CODEX_STATUS=""
+codex_available() {
+  case "${ACORN_CODEX:-auto}" in
+    0|no|off) return 1 ;;
+    1|yes|on) return 0 ;;
+  esac
+  if [ -z "$_ACORN_CODEX_STATUS" ]; then
+    if command -v codex >/dev/null 2>&1 && codex login status >/dev/null 2>&1; then
+      _ACORN_CODEX_STATUS="yes"
+    else
+      _ACORN_CODEX_STATUS="no"
+    fi
+  fi
+  [ "$_ACORN_CODEX_STATUS" = "yes" ]
+}
+
+# Expand model aliases the CLIs do not know natively (the plugin's `spark`).
+expand_model_alias() {
+  case "$1" in
+    spark) printf 'gpt-5.3-codex-spark' ;;
+    *)     printf '%s' "$1" ;;
+  esac
+}
+
+# Apply Codex-availability degradation to a concrete model name.
+resolve_model() {
+  local m
+  m="$(expand_model_alias "$1")"
+  if [ "$(model_family "$m")" = "codex" ] && ! codex_available; then
+    if [ "${ACORN_STRICT_PANEL:-0}" = "1" ]; then
+      die "Panel requires Codex model '$m' but codex is unavailable/unauthed (ACORN_STRICT_PANEL=1)"
+    fi
+    warn "Codex model '$m' unavailable; falling back to '${ACORN_CODEX_FALLBACK:-opus}'"
+    printf '%s' "${ACORN_CODEX_FALLBACK:-opus}"
+    return 0
+  fi
+  printf '%s' "$m"
+}
+
+# Raw table lookup + env override. Returns the unresolved model name.
+panel_raw() {
+  local key="$1"
+  local envkey ovr
+  envkey="ACORN_PANEL_$(printf '%s' "$key" | tr ':-' '__')"
+  eval "ovr=\${$envkey:-}"
+  if [ -n "$ovr" ]; then
+    printf '%s' "$ovr"
+    return 0
+  fi
+  case "$key" in
+    full:recon|lite:recon|quick:recon) printf 'fable' ;;
+    full:draft:minimal)                printf 'gpt-5.6-sol' ;;
+    full:draft:architecture)           printf 'opus' ;;
+    full:draft:robustness)             printf 'sonnet' ;;
+    full:draft:dx)                     printf 'fable' ;;
+    full:evaluate)                     printf 'opus' ;;
+    full:synthesize)                   printf 'opus' ;;
+    full:redteam:1)                    printf 'gpt-5.6-sol' ;;
+    full:redteam:2)                    printf 'opus' ;;
+    full:redteam:3)                    printf 'sonnet' ;;
+    full:redteam:4)                    printf 'fable' ;;
+    full:spec)                         printf 'opus' ;;
+    lite:draft)                        printf 'opus' ;;
+    lite:validate)                     printf 'sonnet' ;;
+    lite:spec)                         printf 'opus' ;;
+    quick:spec)                        printf 'opus' ;;
+    split)                             printf 'sonnet' ;;
+    *) die "panel_model: unknown stage key '$key'" ;;
+  esac
+}
+
+# Public accessor. A second arg of "--claude-only" forces codex-family stages to
+# their Claude fallback — used when interpolating models into the interactive
+# planning prose, since the Claude Code Task tool cannot launch Codex agents.
+panel_model() {
+  local key="$1"
+  local claude_only=0
+  [ "${2:-}" = "--claude-only" ] && claude_only=1
+  local raw
+  raw="$(panel_raw "$key")"
+  if [ "$claude_only" -eq 1 ] && [ "$(model_family "$raw")" = "codex" ]; then
+    printf '%s' "${ACORN_CODEX_FALLBACK:-opus}"
+    return 0
+  fi
+  printf '%s' "$raw"
+}
+
+# Pull the first valid JSON object out of model output (raw or ```-fenced).
+extract_json() {
+  local text="$1" inner
+  if printf '%s' "$text" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "$text"
+    return 0
+  fi
+  inner="$(printf '%s' "$text" | sed -n '/```/,/```/p' | sed '1d;$d')"
+  if [ -n "$inner" ] && printf '%s' "$inner" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "$inner"
+    return 0
+  fi
+  return 1
+}
+
+# run_agent <model> <out_file> [--format text|json] [--schema <file>] [--cwd <dir>]
+# Prompt is read from stdin. Writes the model's final answer to <out_file>.
+# Warns and returns non-zero on any failure.
+run_agent() {
+  local model="$1" out="$2"
+  shift 2
+  local format="text" schema="" cwd="."
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --format) format="${2:-}"; shift 2 ;;
+      --schema) schema="${2:-}"; shift 2 ;;
+      --cwd)    cwd="${2:-}";    shift 2 ;;
+      *) die "run_agent: unknown option '$1'" ;;
+    esac
+  done
+  case "$format" in text|json) ;; *) die "run_agent: --format must be text or json" ;; esac
+
+  local prompt
+  prompt="$(cat)"
+  model="$(resolve_model "$model")"
+
+  if [ "$(model_family "$model")" = "codex" ]; then
+    run_agent_codex "$model" "$out" "$format" "$schema" "$cwd" "$prompt"
+  else
+    run_agent_claude "$model" "$out" "$format" "$schema" "$prompt"
+  fi
+}
+
+run_agent_claude() {
+  local model="$1" out="$2" format="$3" schema="$4" prompt="$5"
+  require_cmds claude jq
+  if [ "$format" = "json" ]; then
+    if [ -n "$schema" ] && [ -f "$schema" ]; then
+      prompt="${prompt}
+
+Respond with ONLY a JSON object that conforms to this JSON Schema. No markdown fencing, no prose:
+$(cat "$schema")"
+    fi
+    local envelope text
+    envelope="$(printf '%s' "$prompt" | claude -p --model "$model" --output-format json 2>/dev/null)" \
+      || { warn "run_agent: claude call failed (model=$model)"; return 1; }
+    text="$(printf '%s' "$envelope" | jq -r '.result // empty')"
+    [ -n "$text" ] || { warn "run_agent: claude returned no result (model=$model)"; return 1; }
+    text="$(extract_json "$text")" \
+      || { warn "run_agent: claude output was not valid JSON (model=$model)"; return 1; }
+    printf '%s' "$text" > "$out"
+  else
+    printf '%s' "$prompt" | claude -p --model "$model" > "$out" \
+      || { warn "run_agent: claude call failed (model=$model)"; return 1; }
+  fi
+}
+
+run_agent_codex() {
+  local model="$1" out="$2" format="$3" schema="$4" cwd="$5" prompt="$6"
+  require_cmds codex jq
+  local args
+  args=(exec -m "$model" --skip-git-repo-check -a never -s read-only -o "$out")
+  if [ "$cwd" != "." ]; then
+    args+=(--cd "$cwd")
+  fi
+  if [ "$format" = "json" ] && [ -n "$schema" ] && [ -f "$schema" ]; then
+    args+=(--output-schema "$schema")
+  fi
+  args+=("$prompt")
+  codex "${args[@]}" >/dev/null 2>&1 \
+    || { warn "run_agent: codex call failed (model=$model)"; return 1; }
+  if [ "$format" = "json" ]; then
+    local text
+    text="$(extract_json "$(cat "$out")")" \
+      || { warn "run_agent: codex output was not valid JSON (model=$model)"; return 1; }
+    printf '%s' "$text" > "$out"
   fi
 }
 
@@ -534,7 +736,36 @@ planning_block() {
 
 planning_block_full() {
   local spec_path="${1:-.}"
-  cat <<'METHODOLOGY_EOF' | sed "s|__SPEC_PATH__|${spec_path}|g"
+  # Per-stage models come from the panel (single source of truth). --claude-only
+  # forces any codex-family entry to its Claude fallback, because the Claude Code
+  # Task tool that runs this pipeline cannot launch Codex agents (see Phase 2).
+  local m_recon m_dmin m_darch m_drob m_ddx m_eval m_synth m_rt1 m_rt2 m_rt3 m_rt4 m_spec
+  m_recon="$(panel_model full:recon --claude-only)"
+  m_dmin="$(panel_model full:draft:minimal --claude-only)"
+  m_darch="$(panel_model full:draft:architecture --claude-only)"
+  m_drob="$(panel_model full:draft:robustness --claude-only)"
+  m_ddx="$(panel_model full:draft:dx --claude-only)"
+  m_eval="$(panel_model full:evaluate --claude-only)"
+  m_synth="$(panel_model full:synthesize --claude-only)"
+  m_rt1="$(panel_model full:redteam:1 --claude-only)"
+  m_rt2="$(panel_model full:redteam:2 --claude-only)"
+  m_rt3="$(panel_model full:redteam:3 --claude-only)"
+  m_rt4="$(panel_model full:redteam:4 --claude-only)"
+  m_spec="$(panel_model full:spec --claude-only)"
+  cat <<'METHODOLOGY_EOF' | sed \
+    -e "s|__SPEC_PATH__|${spec_path}|g" \
+    -e "s|__MODEL_RECON__|${m_recon}|g" \
+    -e "s|__MODEL_DRAFT_MINIMAL__|${m_dmin}|g" \
+    -e "s|__MODEL_DRAFT_ARCH__|${m_darch}|g" \
+    -e "s|__MODEL_DRAFT_ROB__|${m_drob}|g" \
+    -e "s|__MODEL_DRAFT_DX__|${m_ddx}|g" \
+    -e "s|__MODEL_EVAL__|${m_eval}|g" \
+    -e "s|__MODEL_SYNTH__|${m_synth}|g" \
+    -e "s|__MODEL_RT1__|${m_rt1}|g" \
+    -e "s|__MODEL_RT2__|${m_rt2}|g" \
+    -e "s|__MODEL_RT3__|${m_rt3}|g" \
+    -e "s|__MODEL_RT4__|${m_rt4}|g" \
+    -e "s|__MODEL_SPEC__|${m_spec}|g"
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS
 
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
@@ -578,7 +809,7 @@ Total: 14 Task agent launches across 6 stages (Stage 0 through Stage 5). No shor
 
 ### Stage 0: Codebase Reconnaissance
 
-YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
+YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "__MODEL_RECON__".
 
 **Each agent explores the actual codebase to ground all subsequent work in reality.**
 
@@ -648,7 +879,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 
 ### Stage 1: Diverse Parallel Drafting
 
-YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
+YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Assign each drafter its own model: Drafter A = "__MODEL_DRAFT_MINIMAL__", Drafter B = "__MODEL_DRAFT_ARCH__", Drafter C = "__MODEL_DRAFT_ROB__", Drafter D = "__MODEL_DRAFT_DX__".
 Each sub-agent gets a distinct architectural lens that forces genuinely different approaches.
 
 **Drafter A — Minimal Surgery lens:**
@@ -721,7 +952,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 
 ### Stage 2: Rubric-Based Evaluation
 
-YOU MUST launch 1 Task tool call. Use model "opus".
+YOU MUST launch 1 Task tool call. Use model "__MODEL_EVAL__".
 
 **This replaces free-form critique with structured scoring. One evaluator scores all 4 drafts comparatively.**
 
@@ -785,7 +1016,7 @@ Your output MUST include:
 
 ### Stage 3: Weighted Synthesis
 
-YOU MUST launch 1 Task tool call. Use model "opus".
+YOU MUST launch 1 Task tool call. Use model "__MODEL_SYNTH__".
 
 **The synthesizer receives pre-scored drafts so it can make informed trade-offs.**
 
@@ -820,7 +1051,7 @@ Synthesize a master implementation plan using the evaluation to guide decisions:
 
 ### Stage 4: Adversarial Red Team
 
-YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Use model "opus".
+YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Assign each agent its own model: Red Team A = "__MODEL_RT1__", Red Team B = "__MODEL_RT2__", Red Team C = "__MODEL_RT3__", Red Team D = "__MODEL_RT4__".
 
 **These are ADVERSARIAL agents. Their job is to BREAK the spec, not cooperate with it.**
 
@@ -928,7 +1159,7 @@ Be adversarial. Think like a chaos engineer. What breaks under stress?
 
 ### Stage 5: Final Spec with Traceability
 
-YOU MUST launch 1 Task tool call. Use model "opus".
+YOU MUST launch 1 Task tool call. Use model "__MODEL_SPEC__".
 
 **Prompt:**
 
@@ -991,7 +1222,19 @@ METHODOLOGY_EOF
 
 planning_block_lite() {
   local spec_path="${1:-.}"
-  cat <<'METHODOLOGY_EOF' | sed "s|__SPEC_PATH__|${spec_path}|g"
+  # Per-stage models from the panel; --claude-only forces codex entries to their
+  # Claude fallback (the Task tool cannot launch Codex agents; see Phase 2).
+  local m_recon m_draft m_validate m_spec
+  m_recon="$(panel_model lite:recon --claude-only)"
+  m_draft="$(panel_model lite:draft --claude-only)"
+  m_validate="$(panel_model lite:validate --claude-only)"
+  m_spec="$(panel_model lite:spec --claude-only)"
+  cat <<'METHODOLOGY_EOF' | sed \
+    -e "s|__SPEC_PATH__|${spec_path}|g" \
+    -e "s|__MODEL_RECON__|${m_recon}|g" \
+    -e "s|__MODEL_DRAFT__|${m_draft}|g" \
+    -e "s|__MODEL_VALIDATE__|${m_validate}|g" \
+    -e "s|__MODEL_SPEC__|${m_spec}|g"
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (LITE MODE)
 
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
@@ -1037,7 +1280,7 @@ Total: 6 Task agent launches across 4 stages (Stage 0 through Stage 3). No short
 
 ### Stage 0: Codebase Reconnaissance
 
-YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "sonnet".
+YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "__MODEL_RECON__".
 
 **Each agent explores the actual codebase to ground all subsequent work in reality.**
 
@@ -1107,7 +1350,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 
 ### Stage 1: Comprehensive Draft
 
-YOU MUST launch 1 Task tool call. Use model "opus".
+YOU MUST launch 1 Task tool call. Use model "__MODEL_DRAFT__".
 
 **A single drafter balances all four architectural lenses into one comprehensive plan.**
 
@@ -1140,7 +1383,7 @@ Be specific — reference actual file paths, function names, and code patterns f
 
 ### Stage 2: Combined Validation
 
-YOU MUST launch 1 Task tool call. Use model "opus".
+YOU MUST launch 1 Task tool call. Use model "__MODEL_VALIDATE__".
 
 **A single validator performs requirements coverage, codebase fact-checking, ambiguity audit, and edge case analysis.**
 
@@ -1195,7 +1438,7 @@ For each major section:
 
 ### Stage 3: Final Spec
 
-YOU MUST launch 1 Task tool call. Use model "opus".
+YOU MUST launch 1 Task tool call. Use model "__MODEL_SPEC__".
 
 **Prompt:**
 
@@ -1258,7 +1501,15 @@ METHODOLOGY_EOF
 
 planning_block_quick() {
   local spec_path="${1:-.}"
-  cat <<'METHODOLOGY_EOF' | sed "s|__SPEC_PATH__|${spec_path}|g"
+  # Per-stage models from the panel; --claude-only forces codex entries to their
+  # Claude fallback (the Task tool cannot launch Codex agents; see Phase 2).
+  local m_recon m_spec
+  m_recon="$(panel_model quick:recon --claude-only)"
+  m_spec="$(panel_model quick:spec --claude-only)"
+  cat <<'METHODOLOGY_EOF' | sed \
+    -e "s|__SPEC_PATH__|${spec_path}|g" \
+    -e "s|__MODEL_RECON__|${m_recon}|g" \
+    -e "s|__MODEL_SPEC__|${m_spec}|g"
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (QUICK MODE)
 
 > **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
@@ -1302,7 +1553,7 @@ Total: 4 Task agent launches across 2 stages (Stage 0 and Stage 1). No shortcuts
 
 ### Stage 0: Codebase Reconnaissance
 
-YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "sonnet".
+YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "__MODEL_RECON__".
 
 **Each agent explores the actual codebase to ground all subsequent work in reality.**
 
@@ -1372,7 +1623,7 @@ CRITICAL SUB-AGENT INSTRUCTIONS:
 
 ### Stage 1: Direct Spec
 
-YOU MUST launch 1 Task tool call. Use model "opus".
+YOU MUST launch 1 Task tool call. Use model "__MODEL_SPEC__".
 
 **A single agent reads all recon and requirements, then produces SPEC.md directly — no intermediaries.**
 
@@ -2534,41 +2785,44 @@ SPLIT_PROMPT_EOF
 
   printf '[INFO] %s\n' "Analyzing issue for split recommendation (model: $model)..." >&2
 
-  local stderr_file
-  stderr_file="$(mktemp)" || die "Failed to create temp file for stderr capture"
-
-  local response
-  response="$(printf '%s' "$full_prompt" | claude -p --model "$model" 2>"$stderr_file")" || {
-    local err_msg=""
-    [ -f "$stderr_file" ] && err_msg="$(<"$stderr_file")"
-    rm -f "$stderr_file"
-    die "Failed to get split analysis from Claude. Error: ${err_msg:-unknown}. Is the claude CLI installed and authenticated?"
+  # Structured output: hand run_agent a JSON Schema. On Codex this becomes a
+  # hard --output-schema constraint; on Claude it is appended to the prompt and
+  # the result is validated. Either way the caller gets clean JSON, no scraping.
+  local schema_file out_file
+  schema_file="$(mktemp)" || die "Failed to create temp file for schema"
+  out_file="$(mktemp)" || { rm -f "$schema_file"; die "Failed to create temp file for output"; }
+  cat > "$schema_file" <<'SPLIT_SCHEMA_EOF'
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["should_split", "reasoning", "sub_issues"],
+  "properties": {
+    "should_split": { "type": "boolean" },
+    "reasoning": { "type": "string" },
+    "sub_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "scope"],
+        "properties": {
+          "title": { "type": "string" },
+          "scope": { "type": "string" }
+        }
+      }
+    }
   }
-  rm -f "$stderr_file"
+}
+SPLIT_SCHEMA_EOF
 
-  # Extract JSON from response (handle case where model wraps in markdown fencing)
-  local json=""
-  if printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
-    json="$(printf '%s' "$response" | jq -c .)"
+  if ! printf '%s' "$full_prompt" | run_agent "$model" "$out_file" --format json --schema "$schema_file"; then
+    rm -f "$schema_file" "$out_file"
+    die "Failed to get split analysis (model: $model). Is the model CLI installed and authenticated?"
   fi
 
-  if [ -z "$json" ]; then
-    local fenced_json
-    fenced_json="$(printf '%s' "$response" | sed -n '/```json/,/```/p' | sed '1d;$d')"
-    if [ -n "$fenced_json" ] && printf '%s' "$fenced_json" | jq -e . >/dev/null 2>&1; then
-      json="$(printf '%s' "$fenced_json" | jq -c .)"
-    fi
-  fi
-
-  if [ -z "$json" ]; then
-    local fenced_generic
-    fenced_generic="$(printf '%s' "$response" | sed -n '/```/,/```/p' | sed '1d;$d')"
-    if [ -n "$fenced_generic" ] && printf '%s' "$fenced_generic" | jq -e . >/dev/null 2>&1; then
-      json="$(printf '%s' "$fenced_generic" | jq -c .)"
-    fi
-  fi
-
-  [ -n "$json" ] || die "Failed to parse split analysis response. Raw output: $response"
+  local json
+  json="$(jq -c . "$out_file" 2>/dev/null)" || { rm -f "$schema_file" "$out_file"; die "Split analysis returned unparseable output"; }
+  rm -f "$schema_file" "$out_file"
 
   # Validate JSON structure using has() to avoid short-circuit on false values
   printf '%s' "$json" | jq -e 'has("should_split") and has("reasoning") and has("sub_issues")' >/dev/null 2>&1 \
@@ -2811,7 +3065,8 @@ cmd_issue_split() {
     shift
   done
 
-  require_cmds gh jq claude
+  # run_agent requires the model-specific CLI (claude or codex) itself.
+  require_cmds gh jq
   local repo_main
   repo_main="$(safe_repo_main "$repo")"
 
