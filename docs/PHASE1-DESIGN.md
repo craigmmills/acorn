@@ -2,6 +2,8 @@
 
 _Design for review. No code written yet._
 
+> **Correction (2026-07-15):** This doc originally put recon on **Fable** and called it "fast, cheap, Fable's lane." That is wrong. Claude Fable 5 is Anthropic's *most capable and most expensive* model ($10/$50 per MTok, vs Opus 4.8 at $5/$25) — not an efficiency tier. Recon (bulk codebase scanning) belongs on a **cheap** model, so it now defaults to **Sonnet** (1M context, mid-cost). Fable is reserved for high-value reasoning voices (one drafter, one red-teamer; optionally synthesis/final-spec). Read every "recon → Fable" below as "recon → Sonnet."
+
 ## Goal
 
 Establish the reusable primitive and single source of truth that the heterogeneous panel needs, and close the one structured-output gap, without yet touching the tmux/Task orchestration (that's Phase 2). Phase 1 is shippable on its own and de-risks Phase 2.

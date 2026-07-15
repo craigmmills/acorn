@@ -41,7 +41,7 @@ test_model_family() {
 # ──────────────────────────────────────
 test_panel_model() {
   printf '\n\033[1m== panel_model ==\033[0m\n'
-  assert_eq "full recon default fable"   "$(panel_model full:recon)"     "fable"
+  assert_eq "full recon default sonnet"  "$(panel_model full:recon)"     "sonnet"
   assert_eq "full synthesize opus"       "$(panel_model full:synthesize)" "opus"
   assert_eq "split sonnet"               "$(panel_model split)"          "sonnet"
   assert_eq "draft minimal raw is gpt"   "$(panel_model full:draft:minimal)" "gpt-5.6-sol"

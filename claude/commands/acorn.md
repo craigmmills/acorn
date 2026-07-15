@@ -38,8 +38,8 @@ acorn deps graph <repo> <issue#> [<issue#>...]                        # Build wa
 
 ## Options for create / issue plan
 
-- `--lite` — Use lite 4-stage pipeline (6 agents, Fable recon + Opus planning)
-- `--quick` — Use quick 2-stage pipeline (4 agents, Fable recon + Opus direct spec)
+- `--lite` — Use lite 4-stage pipeline (6 agents, Sonnet recon + Opus planning)
+- `--quick` — Use quick 2-stage pipeline (4 agents, Sonnet recon + Opus direct spec)
 - `--no-auto` — Don't auto-trigger the planning pipeline
 
 ## Options for issue create/plan

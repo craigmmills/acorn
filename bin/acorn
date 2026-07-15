@@ -43,9 +43,9 @@ Usage:
   acorn deps graph <repo> <issue#> [<issue#>...]
 
 Pipeline modes (per-stage models come from the panel; see README "Model panel"):
-  (default)   Full 6-stage pipeline — 14 agents, Fable recon + mixed planning
-  --lite      Lite 4-stage pipeline — 6 agents, Fable recon + Opus planning
-  --quick     Quick 2-stage pipeline — 4 agents, Fable recon + Opus direct spec
+  (default)   Full 6-stage pipeline — 14 agents, Sonnet recon + mixed planning
+  --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus planning
+  --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
 
 Dependency management:
   acorn issue depends <repo> <issue#>                       Show dependencies
@@ -147,7 +147,7 @@ panel_raw() {
     return 0
   fi
   case "$key" in
-    full:recon|lite:recon|quick:recon) printf 'fable' ;;
+    full:recon|lite:recon|quick:recon) printf 'sonnet' ;;
     full:draft:minimal)                printf 'gpt-5.6-sol' ;;
     full:draft:architecture)           printf 'opus' ;;
     full:draft:robustness)             printf 'sonnet' ;;
