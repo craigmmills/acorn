@@ -28,7 +28,7 @@ die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage:
-  acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]
+  acorn create <repo> <issue-number> [--no-auto] [--headless] [--lite | --quick]
   acorn list [repo] [--deps]
   acorn status [repo]
   acorn approve <repo> <slug>
@@ -46,6 +46,8 @@ Pipeline modes (per-stage models come from the panel; see README "Model panel"):
   (default)   Full 6-stage pipeline — 14 agents, Sonnet recon + mixed planning
   --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus planning
   --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
+  --headless  Run the pipeline in-process (no tmux/Task tool); routes gpt-* panel
+              entries to real Codex agents. Currently supports --quick only.
 
 Dependency management:
   acorn issue depends <repo> <issue#>                       Show dependencies
@@ -223,12 +225,17 @@ run_agent() {
   if [ "$(model_family "$model")" = "codex" ]; then
     run_agent_codex "$model" "$out" "$format" "$schema" "$cwd" "$prompt"
   else
-    run_agent_claude "$model" "$out" "$format" "$schema" "$prompt"
+    run_agent_claude "$model" "$out" "$format" "$schema" "$cwd" "$prompt"
   fi
 }
 
+# Runs `claude -p` from <cwd> so exploration agents see the target repo, and
+# passes --dangerously-skip-permissions because headless -p has no interactive
+# approver — a permission prompt would otherwise hang the pipeline. Pipeline
+# agents are read-only (Glob/Grep/Read); they return their work as the final
+# message, which run_agent captures to <out> (no file-writing by the agent).
 run_agent_claude() {
-  local model="$1" out="$2" format="$3" schema="$4" prompt="$5"
+  local model="$1" out="$2" format="$3" schema="$4" cwd="$5" prompt="$6"
   require_cmds claude jq
   if [ "$format" = "json" ]; then
     if [ -n "$schema" ] && [ -f "$schema" ]; then
@@ -238,7 +245,7 @@ Respond with ONLY a JSON object that conforms to this JSON Schema. No markdown f
 $(cat "$schema")"
     fi
     local envelope text
-    envelope="$(printf '%s' "$prompt" | claude -p --model "$model" --output-format json 2>/dev/null)" \
+    envelope="$( cd "$cwd" && printf '%s' "$prompt" | claude -p --dangerously-skip-permissions --model "$model" --output-format json 2>/dev/null )" \
       || { warn "run_agent: claude call failed (model=$model)"; return 1; }
     text="$(printf '%s' "$envelope" | jq -r '.result // empty')"
     [ -n "$text" ] || { warn "run_agent: claude returned no result (model=$model)"; return 1; }
@@ -246,7 +253,7 @@ $(cat "$schema")"
       || { warn "run_agent: claude output was not valid JSON (model=$model)"; return 1; }
     printf '%s' "$text" > "$out"
   else
-    printf '%s' "$prompt" | claude -p --model "$model" > "$out" \
+    ( cd "$cwd" && printf '%s' "$prompt" | claude -p --dangerously-skip-permissions --model "$model" ) > "$out" \
       || { warn "run_agent: claude call failed (model=$model)"; return 1; }
   fi
 }
@@ -254,8 +261,10 @@ $(cat "$schema")"
 run_agent_codex() {
   local model="$1" out="$2" format="$3" schema="$4" cwd="$5" prompt="$6"
   require_cmds codex jq
+  # `codex exec` is non-interactive by default (no approval flag exists on it);
+  # -s read-only sandboxes the model's shell commands to read access.
   local args
-  args=(exec -m "$model" --skip-git-repo-check -a never -s read-only -o "$out")
+  args=(exec -m "$model" --skip-git-repo-check -s read-only -o "$out")
   if [ "$cwd" != "." ]; then
     args+=(--cd "$cwd")
   fi
@@ -1706,6 +1715,9 @@ render_prompt_md() {
   local mode="${5:-full}"
   local spec_path="${6:-.}"
   local url_mapping_file="${7:-}"
+  # In headless mode the orchestration methodology is code, not prose, so
+  # PROMPT.md carries only requirements + discussion for the agents to read.
+  local include_methodology="${8:-1}"
 
   # Rewrite image URLs in body if mapping exists
   if [ -n "$url_mapping_file" ] && [ -f "$url_mapping_file" ] && [ -s "$url_mapping_file" ]; then
@@ -1729,8 +1741,10 @@ render_prompt_md() {
     fi
     printf '%s' "$comments_text"
     printf '\n---\n\n'
-    planning_block "$mode" "$spec_path"
-    printf '\n\n---\n\n'
+    if [ "$include_methodology" = "1" ]; then
+      planning_block "$mode" "$spec_path"
+      printf '\n\n---\n\n'
+    fi
     cat <<'EOF'
 ## Completion Protocol
 
@@ -1748,6 +1762,125 @@ validate_prompt_md() {
   local prompt_path="$1"
   grep -q 'PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS' "$prompt_path" || return 1
   return 0
+}
+
+# Lean PROMPT.md (headless mode) has no methodology anchor — validate it carries
+# the requirements section instead.
+validate_prompt_md_lean() {
+  local prompt_path="$1"
+  grep -q '^## Requirements' "$prompt_path" || return 1
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Headless pipeline (Phase 2)
+#
+# acorn drives the pipeline directly: each stage fans out run_agent calls (real
+# Claude AND Codex models straight from the panel — no --claude-only) in
+# parallel, captures each agent's final message to an artifact file, then moves
+# on. No interactive Claude, no tmux, no Task tool. Prompts are agent-facing and
+# concise: the "you are a SUB-AGENT / return only Done / write in ~4000-token
+# chunks" scaffolding the tmux design needed is gone, because the orchestrator
+# owns file-writing and sequencing. Agents run with the target repo as cwd so
+# they explore the real codebase, and reference absolute paths under the spec
+# directory. Prompts are deliberately non-prescriptive (state the goal, not a
+# rigid procedure) — over-prescriptive prompts reduce output quality on the
+# strongest models (notably Fable 5, used for the full-mode final spec).
+# ---------------------------------------------------------------------------
+
+# recon_prompt <facet> <spec_dir_abs>   facet: architecture|relevant_code|conventions
+recon_prompt() {
+  local facet="$1" spec_dir="$2"
+  printf 'Read %s/PROMPT.md to understand the feature being planned, then explore this repository with Glob, Grep, and Read to ground the plan in what actually exists.\n\n' "$spec_dir"
+  case "$facet" in
+    architecture)
+      printf '%s\n' 'Focus on architecture and structure: directory layout, tech stack and frameworks, the build and deployment model, key entry points and main modules, and the data layer (schemas, storage). Reference concrete file paths.'
+      ;;
+    relevant_code)
+      printf '%s\n' 'Focus on the code this feature will touch: the files and modules most likely to change, the existing APIs / endpoints / interfaces involved, the data models and types affected, integration points with other systems, and related existing functionality. Include real function signatures and file:line references.'
+      ;;
+    conventions)
+      printf '%s\n' 'Focus on conventions and constraints: coding style and naming, error-handling patterns, the test framework and how tests are written, CI and quality gates, dependency management, reusable utilities worth using, and anything in CLAUDE.md / AGENTS.md / contributing docs. Give concrete examples.'
+      ;;
+    *) die "recon_prompt: unknown facet '$facet'" ;;
+  esac
+  printf '\n%s\n' 'Return your complete findings as clear markdown that references specific file paths. Do NOT create or write any files — your reply IS the artifact. No preamble, no meta-commentary about what you did.'
+}
+
+# quick_spec_prompt <spec_dir_abs>
+quick_spec_prompt() {
+  local spec_dir="$1"
+  cat <<EOF
+You are producing a complete, implementation-ready specification for a feature.
+
+Read these files:
+- ${spec_dir}/PROMPT.md — the requirements and discussion
+- ${spec_dir}/recon/architecture.md — how the codebase is structured
+- ${spec_dir}/recon/relevant_code.md — the code this feature will touch
+- ${spec_dir}/recon/conventions.md — the patterns to follow
+
+Explore the repository further with Glob, Grep, and Read wherever the recon is thin or you need to confirm a detail.
+
+Produce a SPEC.md an implementing agent can follow without guessing. Cover:
+- A short overview of what is being built and why.
+- The concrete files to create or change, and the specific change in each.
+- A step-by-step implementation plan in dependency order.
+- Data model, schema, and API / interface changes.
+- Testing strategy: what to test and how, matching this repo's test conventions.
+- Edge cases and failure modes to handle.
+- A traceability check mapping each acceptance criterion from PROMPT.md to where the plan satisfies it.
+
+Ground every claim in the actual codebase and reference real file paths. Do NOT create or write any files — your reply IS the spec. Output only the spec markdown.
+EOF
+}
+
+# run_pipeline <mode> <spec_dir_abs> <repo_main_abs>
+run_pipeline() {
+  local mode="$1" spec_dir="$2" repo_main="$3"
+  case "$mode" in
+    quick) run_pipeline_quick "$spec_dir" "$repo_main" ;;
+    lite|full) die "Headless orchestration for '$mode' mode is not implemented yet (the Phase 2 tracer bullet covers quick mode). Run without --headless to use the session-based flow, or use --quick." ;;
+    *) die "run_pipeline: unknown mode '$mode'" ;;
+  esac
+}
+
+# Fan out N recon facets in parallel; fail if any artifact is missing/empty.
+run_recon_stage() {
+  local model="$1" spec_dir="$2" repo_main="$3"
+  info "Stage 0: reconnaissance (3 agents, model=${model})"
+  local facets=(architecture relevant_code conventions)
+  local pids=() facet pid rc=0
+  for facet in "${facets[@]}"; do
+    recon_prompt "$facet" "$spec_dir" \
+      | run_agent "$model" "$spec_dir/recon/${facet}.md" --format text --cwd "$repo_main" &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+  for facet in "${facets[@]}"; do
+    if [ ! -s "$spec_dir/recon/${facet}.md" ]; then
+      warn "recon artifact missing or empty: recon/${facet}.md"
+      rc=1
+    fi
+  done
+  [ "$rc" -eq 0 ] || die "Stage 0 (recon) failed — see warnings above"
+  info "Stage 0 complete: recon/{architecture,relevant_code,conventions}.md"
+}
+
+run_pipeline_quick() {
+  local spec_dir="$1" repo_main="$2"
+  local m_recon m_spec
+  m_recon="$(panel_model quick:recon)"
+  m_spec="$(panel_model quick:spec)"
+  info "Headless pipeline (quick): recon=${m_recon}, spec=${m_spec}"
+
+  run_recon_stage "$m_recon" "$spec_dir" "$repo_main"
+
+  info "Stage 1: final spec (1 agent, model=${m_spec})"
+  quick_spec_prompt "$spec_dir" \
+    | run_agent "$m_spec" "$spec_dir/plans/SPEC.md" --format text --cwd "$repo_main" \
+    || die "Stage 1 (spec) failed"
+  [ -s "$spec_dir/plans/SPEC.md" ] || die "SPEC.md was not produced"
+  info "Stage 1 complete: plans/SPEC.md"
 }
 
 get_extension_from_url() {
@@ -2293,10 +2426,14 @@ cmd_create() {
 
   local auto_trigger=1
   local mode="full"
+  local headless=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --no-auto)
         auto_trigger=0
+        ;;
+      --headless)
+        headless=1
         ;;
       --lite)
         [ "$mode" = "full" ] || die "--lite and --quick are mutually exclusive"
@@ -2313,7 +2450,12 @@ cmd_create() {
     shift
   done
 
-  require_cmds gh jq tmux claude
+  # Headless drives the pipeline in-process (no tmux); the session flow needs tmux.
+  if [ "$headless" -eq 1 ]; then
+    require_cmds gh jq claude
+  else
+    require_cmds gh jq tmux claude
+  fi
   local repo_main
   repo_main="$(safe_repo_main "$repo")"
 
@@ -2340,11 +2482,20 @@ cmd_create() {
     url_mapping_file="$(extract_and_download_images "$issue_json" "$dir/images")"
 
     local tmp_path="$prompt_path.tmp"
-    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$mode" "$dir" "$url_mapping_file"
-    if ! validate_prompt_md "$tmp_path"; then
-      rm -f "$tmp_path"
-      rm -f "$url_mapping_file"
-      die "Prompt generation failed: planning anchor missing"
+    # Headless PROMPT.md omits the planning methodology (the orchestrator is code).
+    local include_methodology=1
+    [ "$headless" -eq 1 ] && include_methodology=0
+    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$mode" "$dir" "$url_mapping_file" "$include_methodology"
+    if [ "$headless" -eq 1 ]; then
+      if ! validate_prompt_md_lean "$tmp_path"; then
+        rm -f "$tmp_path" "$url_mapping_file"
+        die "Prompt generation failed: requirements section missing"
+      fi
+    else
+      if ! validate_prompt_md "$tmp_path"; then
+        rm -f "$tmp_path" "$url_mapping_file"
+        die "Prompt generation failed: planning anchor missing"
+      fi
     fi
     mv "$tmp_path" "$prompt_path"
     rm -f "$url_mapping_file"
@@ -2358,8 +2509,23 @@ cmd_create() {
 
   comment_issue "$repo_main" "$issue_number" "Spec started locally at: $dir"
 
-  local session_name
   local meta_path="$dir/meta.json"
+
+  if [ "$headless" -eq 1 ]; then
+    write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "headless" "" "$mode"
+    echo ""
+    echo "Created spec: $dir"
+    echo "Mode: $mode (headless)"
+    echo "Running the pipeline now — this can take several minutes."
+    echo ""
+    run_pipeline "$mode" "$dir" "$repo_main"
+    echo ""
+    echo "Pipeline complete. Spec: $dir/plans/SPEC.md"
+    echo "Mark ready for review: acorn spec-complete $repo $slug"
+    return 0
+  fi
+
+  local session_name
   session_name=""
 
   if [ -f "$meta_path" ]; then

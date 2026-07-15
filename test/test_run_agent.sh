@@ -151,7 +151,7 @@ test_run_agent_codex() {
   assert_contains "codex got -m gpt-5.6-sol" "$(cat "$arglog")" "-m gpt-5.6-sol"
   assert_contains "codex got exec" "$(cat "$arglog")" "exec"
   assert_contains "codex got --output-schema" "$(cat "$arglog")" "--output-schema"
-  assert_contains "codex non-interactive" "$(cat "$arglog")" "-a never"
+  assert_contains "codex read-only sandbox" "$(cat "$arglog")" "-s read-only"
 
   # codex OFF -> soft-degrade to Claude fallback; codex stub must NOT be called
   : > "$arglog"
