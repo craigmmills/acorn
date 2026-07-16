@@ -44,7 +44,7 @@ Usage:
 
 Pipeline modes (per-stage models come from the panel; see README "Model panel"):
   (default)   Full 6-stage pipeline — 14 agents, Sonnet recon + mixed planning
-  --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus planning
+  --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus draft/spec, Sonnet validation
   --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
   --headless  Run the pipeline in-process (no tmux/Task tool); routes gpt-* panel
               entries to real Codex agents. Currently supports --quick only.
@@ -186,11 +186,28 @@ panel_model() {
   printf '%s' "$raw"
 }
 
-# Pull the first valid JSON object out of model output (raw or ```-fenced).
+# Escape a string for safe use as sed replacement text in `s|__TOK__|HERE|g`.
+# Backslash, ampersand (whole-match), and the `|` delimiter must be escaped, or
+# a value like an ACORN_PANEL_* override containing `&`/`|` corrupts or breaks
+# the substitution.
+sed_rep_escape() {
+  printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
+}
+
+# Pull the first valid JSON object out of model output. Tiers, in order:
+#   1. the whole text is already valid JSON
+#   2. the content of a ```json-tagged fence (preferred over a generic fence, so
+#      a prose-example ```bash block before the answer doesn't win)
+#   3. the content of the first generic ``` fence
 extract_json() {
   local text="$1" inner
   if printf '%s' "$text" | jq -e . >/dev/null 2>&1; then
     printf '%s' "$text"
+    return 0
+  fi
+  inner="$(printf '%s' "$text" | sed -n '/```json/,/```/p' | sed '1d;$d')"
+  if [ -n "$inner" ] && printf '%s' "$inner" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "$inner"
     return 0
   fi
   inner="$(printf '%s' "$text" | sed -n '/```/,/```/p' | sed '1d;$d')"
@@ -201,42 +218,56 @@ extract_json() {
   return 1
 }
 
-# run_agent <model> <out_file> [--format text|json] [--schema <file>] [--cwd <dir>]
-# Prompt is read from stdin. Writes the model's final answer to <out_file>.
+# run_agent <model> <out_file> [--format text|json] [--schema <file>] [--cwd <dir>] [--tools none|read]
+# Prompt is read from stdin. Writes the model's final answer to <out_file>
+# atomically (tmp then mv), so a failed call never truncates a prior artifact.
 # Warns and returns non-zero on any failure.
+#
+# Tool policy (SECURITY): the prompt embeds untrusted GitHub issue text, so
+# agents must NOT be able to run Bash / Write / Edit. We never pass
+# --dangerously-skip-permissions. `none` grants no tools (headless -p denies any
+# tool the model tries — verified: it does not hang). `read` allows Read/Glob/
+# Grep for codebase exploration and still denies everything else. Codex is
+# already sandboxed read-only, which covers both policies.
 run_agent() {
   local model="$1" out="$2"
   shift 2
-  local format="text" schema="" cwd="."
+  local format="text" schema="" cwd="." tools="none"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --format) format="${2:-}"; shift 2 ;;
       --schema) schema="${2:-}"; shift 2 ;;
       --cwd)    cwd="${2:-}";    shift 2 ;;
+      --tools)  tools="${2:-}";  shift 2 ;;
       *) die "run_agent: unknown option '$1'" ;;
     esac
   done
   case "$format" in text|json) ;; *) die "run_agent: --format must be text or json" ;; esac
+  case "$tools" in none|read) ;; *) die "run_agent: --tools must be none or read" ;; esac
 
   local prompt
   prompt="$(cat)"
   model="$(resolve_model "$model")"
 
   if [ "$(model_family "$model")" = "codex" ]; then
-    run_agent_codex "$model" "$out" "$format" "$schema" "$cwd" "$prompt"
+    run_agent_codex "$model" "$out" "$format" "$schema" "$cwd" "$tools" "$prompt"
   else
-    run_agent_claude "$model" "$out" "$format" "$schema" "$cwd" "$prompt"
+    run_agent_claude "$model" "$out" "$format" "$schema" "$cwd" "$tools" "$prompt"
   fi
 }
 
-# Runs `claude -p` from <cwd> so exploration agents see the target repo, and
-# passes --dangerously-skip-permissions because headless -p has no interactive
-# approver — a permission prompt would otherwise hang the pipeline. Pipeline
-# agents are read-only (Glob/Grep/Read); they return their work as the final
-# message, which run_agent captures to <out> (no file-writing by the agent).
 run_agent_claude() {
-  local model="$1" out="$2" format="$3" schema="$4" cwd="$5" prompt="$6"
+  local model="$1" out="$2" format="$3" schema="$4" cwd="$5" tools="$6" prompt="$7"
   require_cmds claude jq
+  # No --dangerously-skip-permissions. `read` allowlists exploration tools only;
+  # `none` grants nothing. Either way Bash/Write/Edit are denied headlessly.
+  local tool_args=()
+  case "$tools" in
+    read) tool_args=(--allowedTools "Read Glob Grep") ;;
+    none) tool_args=() ;;
+  esac
+  local tmp="$out.tmp.$$" err
+  err="$(mktemp)"
   if [ "$format" = "json" ]; then
     if [ -n "$schema" ] && [ -f "$schema" ]; then
       prompt="${prompt}
@@ -245,26 +276,33 @@ Respond with ONLY a JSON object that conforms to this JSON Schema. No markdown f
 $(cat "$schema")"
     fi
     local envelope text
-    envelope="$( cd "$cwd" && printf '%s' "$prompt" | claude -p --dangerously-skip-permissions --model "$model" --output-format json 2>/dev/null )" \
-      || { warn "run_agent: claude call failed (model=$model)"; return 1; }
+    if ! envelope="$( cd "$cwd" && printf '%s' "$prompt" | claude -p ${tool_args[@]+"${tool_args[@]}"} --model "$model" --output-format json 2>"$err" )"; then
+      warn "run_agent: claude call failed (model=$model): $(head -c 500 "$err" 2>/dev/null)"; rm -f "$err"; return 1
+    fi
+    rm -f "$err"
     text="$(printf '%s' "$envelope" | jq -r '.result // empty')"
     [ -n "$text" ] || { warn "run_agent: claude returned no result (model=$model)"; return 1; }
     text="$(extract_json "$text")" \
       || { warn "run_agent: claude output was not valid JSON (model=$model)"; return 1; }
-    printf '%s' "$text" > "$out"
+    printf '%s' "$text" > "$tmp" && mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }
   else
-    ( cd "$cwd" && printf '%s' "$prompt" | claude -p --dangerously-skip-permissions --model "$model" ) > "$out" \
-      || { warn "run_agent: claude call failed (model=$model)"; return 1; }
+    if ! ( cd "$cwd" && printf '%s' "$prompt" | claude -p ${tool_args[@]+"${tool_args[@]}"} --model "$model" ) > "$tmp" 2>"$err"; then
+      warn "run_agent: claude call failed (model=$model): $(head -c 500 "$err" 2>/dev/null)"; rm -f "$tmp" "$err"; return 1
+    fi
+    rm -f "$err"
+    mv "$tmp" "$out"
   fi
 }
 
 run_agent_codex() {
-  local model="$1" out="$2" format="$3" schema="$4" cwd="$5" prompt="$6"
+  local model="$1" out="$2" format="$3" schema="$4" cwd="$5" tools="$6" prompt="$7"
   require_cmds codex jq
-  # `codex exec` is non-interactive by default (no approval flag exists on it);
-  # -s read-only sandboxes the model's shell commands to read access.
+  # `codex exec` is non-interactive by default; -s read-only sandboxes the
+  # model's shell commands to read access, which satisfies both tool policies.
+  local tmp="$out.tmp.$$" err
+  err="$(mktemp)"
   local args
-  args=(exec -m "$model" --skip-git-repo-check -s read-only -o "$out")
+  args=(exec -m "$model" --skip-git-repo-check -s read-only -o "$tmp")
   if [ "$cwd" != "." ]; then
     args+=(--cd "$cwd")
   fi
@@ -272,14 +310,17 @@ run_agent_codex() {
     args+=(--output-schema "$schema")
   fi
   args+=("$prompt")
-  codex "${args[@]}" >/dev/null 2>&1 \
-    || { warn "run_agent: codex call failed (model=$model)"; return 1; }
+  if ! codex "${args[@]}" >/dev/null 2>"$err"; then
+    warn "run_agent: codex call failed (model=$model): $(head -c 500 "$err" 2>/dev/null)"; rm -f "$tmp" "$err"; return 1
+  fi
+  rm -f "$err"
   if [ "$format" = "json" ]; then
     local text
-    text="$(extract_json "$(cat "$out")")" \
-      || { warn "run_agent: codex output was not valid JSON (model=$model)"; return 1; }
-    printf '%s' "$text" > "$out"
+    text="$(extract_json "$(cat "$tmp")")" \
+      || { warn "run_agent: codex output was not valid JSON (model=$model)"; rm -f "$tmp"; return 1; }
+    printf '%s' "$text" > "$tmp"
   fi
+  mv "$tmp" "$out"
 }
 
 repo_main_path() {
@@ -748,21 +789,24 @@ planning_block_full() {
   # Per-stage models come from the panel (single source of truth). --claude-only
   # forces any codex-family entry to its Claude fallback, because the Claude Code
   # Task tool that runs this pipeline cannot launch Codex agents (see Phase 2).
-  local m_recon m_dmin m_darch m_drob m_ddx m_eval m_synth m_rt1 m_rt2 m_rt3 m_rt4 m_spec
-  m_recon="$(panel_model full:recon --claude-only)"
-  m_dmin="$(panel_model full:draft:minimal --claude-only)"
-  m_darch="$(panel_model full:draft:architecture --claude-only)"
-  m_drob="$(panel_model full:draft:robustness --claude-only)"
-  m_ddx="$(panel_model full:draft:dx --claude-only)"
-  m_eval="$(panel_model full:evaluate --claude-only)"
-  m_synth="$(panel_model full:synthesize --claude-only)"
-  m_rt1="$(panel_model full:redteam:1 --claude-only)"
-  m_rt2="$(panel_model full:redteam:2 --claude-only)"
-  m_rt3="$(panel_model full:redteam:3 --claude-only)"
-  m_rt4="$(panel_model full:redteam:4 --claude-only)"
-  m_spec="$(panel_model full:spec --claude-only)"
+  # Values are sed-escaped (sed_rep_escape) so an ACORN_PANEL_* override or spec
+  # path containing & / | / \ cannot corrupt or break the substitution.
+  local sp m_recon m_dmin m_darch m_drob m_ddx m_eval m_synth m_rt1 m_rt2 m_rt3 m_rt4 m_spec
+  sp="$(sed_rep_escape "$spec_path")"
+  m_recon="$(sed_rep_escape "$(panel_model full:recon --claude-only)")"
+  m_dmin="$(sed_rep_escape "$(panel_model full:draft:minimal --claude-only)")"
+  m_darch="$(sed_rep_escape "$(panel_model full:draft:architecture --claude-only)")"
+  m_drob="$(sed_rep_escape "$(panel_model full:draft:robustness --claude-only)")"
+  m_ddx="$(sed_rep_escape "$(panel_model full:draft:dx --claude-only)")"
+  m_eval="$(sed_rep_escape "$(panel_model full:evaluate --claude-only)")"
+  m_synth="$(sed_rep_escape "$(panel_model full:synthesize --claude-only)")"
+  m_rt1="$(sed_rep_escape "$(panel_model full:redteam:1 --claude-only)")"
+  m_rt2="$(sed_rep_escape "$(panel_model full:redteam:2 --claude-only)")"
+  m_rt3="$(sed_rep_escape "$(panel_model full:redteam:3 --claude-only)")"
+  m_rt4="$(sed_rep_escape "$(panel_model full:redteam:4 --claude-only)")"
+  m_spec="$(sed_rep_escape "$(panel_model full:spec --claude-only)")"
   cat <<'METHODOLOGY_EOF' | sed \
-    -e "s|__SPEC_PATH__|${spec_path}|g" \
+    -e "s|__SPEC_PATH__|${sp}|g" \
     -e "s|__MODEL_RECON__|${m_recon}|g" \
     -e "s|__MODEL_DRAFT_MINIMAL__|${m_dmin}|g" \
     -e "s|__MODEL_DRAFT_ARCH__|${m_darch}|g" \
@@ -1233,13 +1277,14 @@ planning_block_lite() {
   local spec_path="${1:-.}"
   # Per-stage models from the panel; --claude-only forces codex entries to their
   # Claude fallback (the Task tool cannot launch Codex agents; see Phase 2).
-  local m_recon m_draft m_validate m_spec
-  m_recon="$(panel_model lite:recon --claude-only)"
-  m_draft="$(panel_model lite:draft --claude-only)"
-  m_validate="$(panel_model lite:validate --claude-only)"
-  m_spec="$(panel_model lite:spec --claude-only)"
+  local sp m_recon m_draft m_validate m_spec
+  sp="$(sed_rep_escape "$spec_path")"
+  m_recon="$(sed_rep_escape "$(panel_model lite:recon --claude-only)")"
+  m_draft="$(sed_rep_escape "$(panel_model lite:draft --claude-only)")"
+  m_validate="$(sed_rep_escape "$(panel_model lite:validate --claude-only)")"
+  m_spec="$(sed_rep_escape "$(panel_model lite:spec --claude-only)")"
   cat <<'METHODOLOGY_EOF' | sed \
-    -e "s|__SPEC_PATH__|${spec_path}|g" \
+    -e "s|__SPEC_PATH__|${sp}|g" \
     -e "s|__MODEL_RECON__|${m_recon}|g" \
     -e "s|__MODEL_DRAFT__|${m_draft}|g" \
     -e "s|__MODEL_VALIDATE__|${m_validate}|g" \
@@ -1512,11 +1557,12 @@ planning_block_quick() {
   local spec_path="${1:-.}"
   # Per-stage models from the panel; --claude-only forces codex entries to their
   # Claude fallback (the Task tool cannot launch Codex agents; see Phase 2).
-  local m_recon m_spec
-  m_recon="$(panel_model quick:recon --claude-only)"
-  m_spec="$(panel_model quick:spec --claude-only)"
+  local sp m_recon m_spec
+  sp="$(sed_rep_escape "$spec_path")"
+  m_recon="$(sed_rep_escape "$(panel_model quick:recon --claude-only)")"
+  m_spec="$(sed_rep_escape "$(panel_model quick:spec --claude-only)")"
   cat <<'METHODOLOGY_EOF' | sed \
-    -e "s|__SPEC_PATH__|${spec_path}|g" \
+    -e "s|__SPEC_PATH__|${sp}|g" \
     -e "s|__MODEL_RECON__|${m_recon}|g" \
     -e "s|__MODEL_SPEC__|${m_spec}|g"
 ## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (QUICK MODE)
@@ -1852,7 +1898,7 @@ run_recon_stage() {
   local pids=() facet pid rc=0
   for facet in "${facets[@]}"; do
     recon_prompt "$facet" "$spec_dir" \
-      | run_agent "$model" "$spec_dir/recon/${facet}.md" --format text --cwd "$repo_main" &
+      | run_agent "$model" "$spec_dir/recon/${facet}.md" --format text --cwd "$repo_main" --tools read &
     pids+=("$!")
   done
   for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
@@ -1877,7 +1923,7 @@ run_pipeline_quick() {
 
   info "Stage 1: final spec (1 agent, model=${m_spec})"
   quick_spec_prompt "$spec_dir" \
-    | run_agent "$m_spec" "$spec_dir/plans/SPEC.md" --format text --cwd "$repo_main" \
+    | run_agent "$m_spec" "$spec_dir/plans/SPEC.md" --format text --cwd "$repo_main" --tools read \
     || die "Stage 1 (spec) failed"
   [ -s "$spec_dir/plans/SPEC.md" ] || die "SPEC.md was not produced"
   info "Stage 1 complete: plans/SPEC.md"
@@ -2385,20 +2431,26 @@ list_status_for_repo() {
 
     [ -n "$backend" ] && [ "$backend" != "null" ] || backend="tmux"
 
-    if [ -z "$session_name" ] || [ "$session_name" = "null" ]; then
-      session_name="$(canonical_session_name "$repo" "$slug")"
+    local state attach
+    if [ "$backend" = "headless" ]; then
+      # Headless specs have no attachable session; don't synthesize a tmux name
+      # (which session_state would then report as "dead"). Progress is the label
+      # / SPEC.md, shown in the STATUS column.
+      session_name=""
+      state="n/a"
+      attach="-"
+    else
+      if [ -z "$session_name" ] || [ "$session_name" = "null" ]; then
+        session_name="$(canonical_session_name "$repo" "$slug")"
+      fi
+      state="$(session_state "$session_name" "$has_meta")"
+      attach="$(attach_command "$session_name" "$state")"
     fi
-
-    local state
-    state="$(session_state "$session_name" "$has_meta")"
 
     local issue
     issue="$(issue_number_from_slug "$slug")"
     local pipeline_status
     pipeline_status="$(status_for_spec "$repo_main" "$issue" "$dir")"
-
-    local attach
-    attach="$(attach_command "$session_name" "$state")"
 
     local display_slug
     display_slug="$(truncate_str "$slug" 40)"
@@ -2450,6 +2502,12 @@ cmd_create() {
     shift
   done
 
+  # Reject unsupported combinations BEFORE any GitHub side effects (labeling,
+  # commenting) so a bad invocation never half-initializes an issue.
+  if [ "$headless" -eq 1 ] && [ "$mode" != "quick" ]; then
+    die "--headless currently supports --quick only (got mode: $mode). Run with --quick, or without --headless for the session flow."
+  fi
+
   # Headless drives the pipeline in-process (no tmux); the session flow needs tmux.
   if [ "$headless" -eq 1 ]; then
     require_cmds gh jq claude
@@ -2474,8 +2532,29 @@ cmd_create() {
   mkdir -p "$dir/recon"
   mkdir -p "$dir/images"
 
+  # Decide whether to (re)generate PROMPT.md. A pre-existing PROMPT.md is only
+  # safe to reuse if its flavor matches the requested mode: headless wants a lean
+  # (methodology-free) prompt, the session flow needs the methodology block. A
+  # mismatch (e.g. a lean PROMPT.md left by an earlier --headless run, then a
+  # plain `acorn create`) would silently feed the wrong instructions to the
+  # pipeline, so regenerate instead of "leaving as-is".
   local prompt_path="$dir/PROMPT.md"
+  local need_generate=0
   if [ ! -f "$prompt_path" ]; then
+    need_generate=1
+  elif [ "$headless" -eq 1 ]; then
+    if grep -q 'PLANNING METHODOLOGY' "$prompt_path"; then
+      info "Existing PROMPT.md is the session flavor; regenerating lean for --headless"
+      need_generate=1
+    fi
+  else
+    if ! grep -q 'PLANNING METHODOLOGY' "$prompt_path"; then
+      info "Existing PROMPT.md is the headless flavor; regenerating with methodology for the session flow"
+      need_generate=1
+    fi
+  fi
+
+  if [ "$need_generate" -eq 1 ]; then
     # Extract and download images from issue markdown
     info "Extracting images from issue #$issue_number"
     local url_mapping_file
@@ -2497,11 +2576,18 @@ cmd_create() {
         die "Prompt generation failed: planning anchor missing"
       fi
     fi
+    # Guard against interpolation drift: no unreplaced __MODEL_*__ / __SPEC_PATH__
+    # token should ever reach the orchestrator (validate_prompt_md only checks the
+    # anchor line, which survives even when a token substitution is missing).
+    if grep -qE '__MODEL_[A-Z0-9_]*__|__SPEC_PATH__' "$tmp_path"; then
+      rm -f "$tmp_path" "$url_mapping_file"
+      die "Prompt generation failed: unreplaced placeholder token(s) in PROMPT.md (panel/sed drift)"
+    fi
     mv "$tmp_path" "$prompt_path"
     rm -f "$url_mapping_file"
     info "Generated $prompt_path"
   else
-    info "PROMPT.md already exists, leaving as-is"
+    info "PROMPT.md already exists (matches mode), leaving as-is"
   fi
 
   ensure_labels "$repo_main"
@@ -2911,6 +2997,13 @@ analyze_issue_for_split() {
   # generation-stale full ID. Override per-call with `acorn issue split --model`.
   local model="${4:-sonnet}"
 
+  # Require the model's CLI up front, before creating temp files, so a missing
+  # CLI fails cleanly instead of leaking temps when run_agent dies mid-way.
+  case "$(model_family "$model")" in
+    codex) require_cmds codex jq ;;
+    *)     require_cmds claude jq ;;
+  esac
+
   local prompt
   prompt="$(cat <<'SPLIT_PROMPT_EOF'
 You are analyzing a GitHub issue to determine whether it should be split into smaller, more focused issues.
@@ -2957,6 +3050,9 @@ SPLIT_PROMPT_EOF
   local schema_file out_file
   schema_file="$(mktemp)" || die "Failed to create temp file for schema"
   out_file="$(mktemp)" || { rm -f "$schema_file"; die "Failed to create temp file for output"; }
+  # Guarantee cleanup even if run_agent dies (e.g. ACORN_STRICT_PANEL with an
+  # unavailable Codex model). Cleared on the normal return path below.
+  trap 'rm -f "$schema_file" "$out_file" 2>/dev/null' EXIT
   cat > "$schema_file" <<'SPLIT_SCHEMA_EOF'
 {
   "type": "object",
@@ -2982,13 +3078,13 @@ SPLIT_PROMPT_EOF
 SPLIT_SCHEMA_EOF
 
   if ! printf '%s' "$full_prompt" | run_agent "$model" "$out_file" --format json --schema "$schema_file"; then
-    rm -f "$schema_file" "$out_file"
-    die "Failed to get split analysis (model: $model). Is the model CLI installed and authenticated?"
+    die "Failed to get split analysis (model: $model). See the run_agent error above."
   fi
 
   local json
-  json="$(jq -c . "$out_file" 2>/dev/null)" || { rm -f "$schema_file" "$out_file"; die "Split analysis returned unparseable output"; }
+  json="$(jq -c . "$out_file" 2>/dev/null)" || die "Split analysis returned unparseable output"
   rm -f "$schema_file" "$out_file"
+  trap - EXIT
 
   # Validate JSON structure using has() to avoid short-circuit on false values
   printf '%s' "$json" | jq -e 'has("should_split") and has("reasoning") and has("sub_issues")' >/dev/null 2>&1 \
@@ -3211,7 +3307,9 @@ cmd_issue_split() {
   shift 2
 
   local yes=0
-  local model="sonnet"
+  # Default from the panel (honors ACORN_PANEL_split); --model overrides below.
+  local model
+  model="$(panel_model split)"
 
   while [ "$#" -gt 0 ]; do
     case "$1" in

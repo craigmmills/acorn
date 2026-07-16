@@ -25,6 +25,10 @@ assert_file_contains() {
   local name="$1" file="$2" needle="$3"
   if [ -f "$file" ] && grep -qF -- "$needle" "$file"; then pass "$name"; else fail "$name" "file '$file' missing or lacks '$needle'"; fi
 }
+assert_eq() {
+  local name="$1" actual="$2" expected="$3"
+  if [ "$actual" = "$expected" ]; then pass "$name"; else fail "$name" "expected '$expected', got '$actual'"; fi
+}
 
 # ──────────────────────────────────────
 # recon_prompt / quick_spec_prompt
@@ -139,11 +143,33 @@ test_quick_recon_failure() {
   rm -rf "$spec" "$repo"
 }
 
+# ──────────────────────────────────────
+# sed interpolation safety: ACORN_PANEL_* with sed metachars must not corrupt
+# ──────────────────────────────────────
+test_sed_escape() {
+  printf '\n\033[1m== sed_rep_escape + planning-block interpolation ==\033[0m\n'
+  assert_eq "escapes ampersand" "$(sed_rep_escape 'a&b')" 'a\&b'
+  assert_eq "escapes pipe"      "$(sed_rep_escape 'a|b')" 'a\|b'
+  assert_eq "escapes backslash" "$(sed_rep_escape 'a\b')" 'a\\b'
+
+  # A panel override containing '&' must render literally, not expand to the token.
+  local out
+  out="$(ACORN_PANEL_full_recon='x&y' ACORN_CODEX=0 planning_block full /tmp/s 2>/dev/null)"
+  assert_contains "ampersand override renders literally" "$out" 'Use model "x&y"'
+  assert_not_contains "no residual model token" "$out" '__MODEL_RECON__'
+
+  # A '|' (the sed delimiter) in an override must not break rendering.
+  local ec=0
+  ( ACORN_PANEL_full_recon='a|b' ACORN_CODEX=0 planning_block full /tmp/s >/dev/null 2>&1 ) || ec=$?
+  [ "$ec" -eq 0 ] && pass "pipe override does not break sed" || fail "pipe override does not break sed" "render errored"
+}
+
 test_prompt_builders
 test_lean_prompt_md
 test_dispatcher
 test_quick_orchestration
 test_quick_recon_failure
+test_sed_escape
 
 printf '\n\033[1mResults: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

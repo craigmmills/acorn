@@ -167,7 +167,7 @@ acorn list [repo] --deps
 | REPO | Repository name |
 | SLUG | Spec slug (truncated to 40 chars) |
 | SESSION | `running` / `dead` / `no-session` |
-| BACKEND | Session backend from meta.json (always `tmux`) |
+| BACKEND | Session backend from meta.json (`tmux`, or `headless` for `--headless` runs) |
 | STATUS | Lifecycle label (or legacy fallback `planning` / `review` / `unknown`) |
 | ATTACH | `tmux attach -t <session>` command (if running) |
 

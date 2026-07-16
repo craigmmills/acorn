@@ -81,6 +81,10 @@ test_extract_json() {
   local fenced
   fenced=$'prose\n```json\n{"a":2}\n```\nmore'
   assert_contains "fenced json" "$(extract_json "$fenced")" '"a":2'
+  # A ```bash example fence BEFORE the ```json answer must not win (regression).
+  local mixed
+  mixed=$'Example:\n```bash\necho hi\n```\nAnswer:\n```json\n{"should_split":false}\n```'
+  assert_eq "prefers json-tagged fence over earlier fence" "$(extract_json "$mixed")" '{"should_split":false}'
   local ec=0
   ( extract_json "not json at all" >/dev/null 2>&1 ) || ec=$?
   if [ "$ec" -ne 0 ]; then pass "non-json fails"; else fail "non-json fails" "expected non-zero"; fi
@@ -121,8 +125,41 @@ test_run_agent_claude() {
   assert_contains "claude json used --output-format" "$(cat "$arglog")" "--output-format json"
   assert_contains "claude json got --model sonnet" "$(cat "$arglog")" "--model sonnet"
 
+  # SECURITY: never pass --dangerously-skip-permissions; default (none) grants no tools
+  : > "$arglog"; export CLAUDE_RESULT="ok"
+  printf 'p' | run_agent opus "$out" --format text
+  if grep -qF -- "--dangerously-skip-permissions" "$arglog"; then fail "no skip-permissions (default)" "flag present"; else pass "no skip-permissions (default)"; fi
+  if grep -qF -- "--allowedTools" "$arglog"; then fail "no tools by default" "--allowedTools present"; else pass "no tools by default"; fi
+
+  # --tools read grants Read/Glob/Grep only, still no skip-permissions
+  : > "$arglog"
+  printf 'p' | run_agent opus "$out" --format text --tools read
+  assert_contains "read policy allowlists tools" "$(cat "$arglog")" "--allowedTools"
+  assert_contains "read policy is read-only set"  "$(cat "$arglog")" "Read Glob Grep"
+  if grep -qF -- "--dangerously-skip-permissions" "$arglog"; then fail "no skip-permissions (read)" "flag present"; else pass "no skip-permissions (read)"; fi
+
   unset -f claude; unset ARGLOG CLAUDE_RESULT ACORN_CODEX
   rm -f "$arglog" "$out"
+}
+
+# ──────────────────────────────────────
+# Atomic write: a failed call must not clobber a prior artifact
+# ──────────────────────────────────────
+test_run_agent_atomic() {
+  printf '\n\033[1m== run_agent atomic write ==\033[0m\n'
+  local out; out="$(mktemp)"
+  printf 'PRIOR-GOOD-SPEC' > "$out"
+  # Stub claude to fail (non-zero) without producing output.
+  claude() { cat >/dev/null; return 3; }
+  export -f claude; export ACORN_CODEX=0
+  local ec=0
+  printf 'p' | run_agent opus "$out" --format text 2>/dev/null || ec=$?
+  [ "$ec" -ne 0 ] && pass "failed call returns non-zero" || fail "failed call returns non-zero" "got 0"
+  assert_eq "prior artifact preserved on failure" "$(cat "$out")" "PRIOR-GOOD-SPEC"
+  # No stray tmp files left behind
+  if ls "$out".tmp.* >/dev/null 2>&1; then fail "no leftover tmp" "tmp files remain"; else pass "no leftover tmp"; fi
+  unset -f claude; unset ACORN_CODEX
+  rm -f "$out"
 }
 
 # ──────────────────────────────────────
@@ -176,6 +213,7 @@ test_panel_model
 test_resolve_model
 test_extract_json
 test_run_agent_claude
+test_run_agent_atomic
 test_run_agent_codex
 
 printf '\n\033[1mResults: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
