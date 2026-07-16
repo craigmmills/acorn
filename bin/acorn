@@ -197,21 +197,28 @@ sed_rep_escape() {
 
 # Pull the first valid JSON object out of model output. Tiers, in order:
 #   1. the whole text is already valid JSON
-#   2. the content of a ```json-tagged fence (preferred over a generic fence, so
-#      a prose-example ```bash block before the answer doesn't win)
-#   3. the content of the first generic ``` fence
+#   2. the content of the FIRST ```json-tagged fence
+#   3. the content of the FIRST generic ``` fence
+# Both fence tiers extract only the first fenced block (awk, stopping at the
+# closing fence) so multiple fences aren't concatenated into invalid JSON.
 extract_json() {
   local text="$1" inner
   if printf '%s' "$text" | jq -e . >/dev/null 2>&1; then
     printf '%s' "$text"
     return 0
   fi
-  inner="$(printf '%s' "$text" | sed -n '/```json/,/```/p' | sed '1d;$d')"
+  inner="$(printf '%s' "$text" | awk '
+    /^[[:space:]]*```[Jj][Ss][Oo][Nn][[:space:]]*$/ {inb=1; next}
+    inb && /^[[:space:]]*```[[:space:]]*$/ {exit}
+    inb {print}')"
   if [ -n "$inner" ] && printf '%s' "$inner" | jq -e . >/dev/null 2>&1; then
     printf '%s' "$inner"
     return 0
   fi
-  inner="$(printf '%s' "$text" | sed -n '/```/,/```/p' | sed '1d;$d')"
+  inner="$(printf '%s' "$text" | awk '
+    !seen && /^[[:space:]]*```/ {seen=1; inb=1; next}
+    inb && /^[[:space:]]*```[[:space:]]*$/ {exit}
+    inb {print}')"
   if [ -n "$inner" ] && printf '%s' "$inner" | jq -e . >/dev/null 2>&1; then
     printf '%s' "$inner"
     return 0
@@ -260,12 +267,15 @@ run_agent() {
 run_agent_claude() {
   local model="$1" out="$2" format="$3" schema="$4" cwd="$5" tools="$6" prompt="$7"
   require_cmds claude jq
-  # No --dangerously-skip-permissions. `read` allowlists exploration tools only;
-  # `none` grants nothing. Either way Bash/Write/Edit are denied headlessly.
-  local tool_args=()
+  # No --dangerously-skip-permissions. --disallowedTools hard-denies the
+  # dangerous tools regardless of the user's settings (verified: an exclusive
+  # deny even when project settings "allow" them); `read` additionally
+  # allowlists the read-only exploration tools. Untrusted issue text can never
+  # reach Bash/Write/Edit this way.
+  local tool_args=(--disallowedTools "Bash Write Edit NotebookEdit")
   case "$tools" in
-    read) tool_args=(--allowedTools "Read Glob Grep") ;;
-    none) tool_args=() ;;
+    read) tool_args+=(--allowedTools "Read Glob Grep") ;;
+    none) ;;
   esac
   local tmp="$out.tmp.$$" err
   err="$(mktemp)"
@@ -277,7 +287,7 @@ Respond with ONLY a JSON object that conforms to this JSON Schema. No markdown f
 $(cat "$schema")"
     fi
     local envelope text
-    if ! envelope="$( cd "$cwd" && printf '%s' "$prompt" | claude -p ${tool_args[@]+"${tool_args[@]}"} --model "$model" --output-format json 2>"$err" )"; then
+    if ! envelope="$( cd "$cwd" && printf '%s' "$prompt" | claude -p "${tool_args[@]}" --model "$model" --output-format json 2>"$err" )"; then
       warn "run_agent: claude call failed (model=$model): $(head -c 500 "$err" 2>/dev/null)"; rm -f "$err"; return 1
     fi
     rm -f "$err"
@@ -287,10 +297,12 @@ $(cat "$schema")"
       || { warn "run_agent: claude output was not valid JSON (model=$model)"; return 1; }
     printf '%s' "$text" > "$tmp" && mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }
   else
-    if ! ( cd "$cwd" && printf '%s' "$prompt" | claude -p ${tool_args[@]+"${tool_args[@]}"} --model "$model" ) > "$tmp" 2>"$err"; then
+    if ! ( cd "$cwd" && printf '%s' "$prompt" | claude -p "${tool_args[@]}" --model "$model" ) > "$tmp" 2>"$err"; then
       warn "run_agent: claude call failed (model=$model): $(head -c 500 "$err" 2>/dev/null)"; rm -f "$tmp" "$err"; return 1
     fi
     rm -f "$err"
+    # A zero-exit but empty response must NOT clobber a prior good artifact.
+    [ -s "$tmp" ] || { warn "run_agent: claude produced empty output (model=$model)"; rm -f "$tmp"; return 1; }
     mv "$tmp" "$out"
   fi
 }
@@ -298,8 +310,15 @@ $(cat "$schema")"
 run_agent_codex() {
   local model="$1" out="$2" format="$3" schema="$4" cwd="$5" tools="$6" prompt="$7"
   require_cmds codex jq
-  # `codex exec` is non-interactive by default; -s read-only sandboxes the
-  # model's shell commands to read access, which satisfies both tool policies.
+  # `codex exec -s read-only` sandboxes the model's shell to read-only (no
+  # writes, no network egress), but unlike Claude's --disallowedTools it cannot
+  # be made fully tool-less: a codex agent can still READ local files and echo
+  # them back in its reply. That reply stays in the user's terminal (no exfil to
+  # the issue author under read-only), but for the untrusted-text `none` path
+  # (e.g. `acorn issue split` on a codex model) a Claude model is safer; warn.
+  if [ "$tools" = "none" ]; then
+    warn "run_agent: codex model '$model' analyzing untrusted text runs in codex's read-only sandbox (can read local files); a Claude model is preferred here."
+  fi
   local tmp="$out.tmp.$$" err
   err="$(mktemp)"
   local args
@@ -321,6 +340,8 @@ run_agent_codex() {
       || { warn "run_agent: codex output was not valid JSON (model=$model)"; rm -f "$tmp"; return 1; }
     printf '%s' "$text" > "$tmp"
   fi
+  # A zero-exit but empty response must NOT clobber a prior good artifact.
+  [ -s "$tmp" ] || { warn "run_agent: codex produced empty output (model=$model)"; rm -f "$tmp"; return 1; }
   mv "$tmp" "$out"
 }
 
@@ -1789,8 +1810,15 @@ render_prompt_md() {
     printf '%s' "$comments_text"
     printf '\n---\n\n'
     if [ "$include_methodology" = "1" ]; then
-      planning_block "$mode" "$spec_path"
-      printf '\n\n---\n\n'
+      # Capture the interpolated methodology separately so the residual-token
+      # guard scans ONLY acorn's own template output, not the untrusted issue
+      # text above (which may legitimately contain a literal __MODEL_X__).
+      local methodology
+      methodology="$(planning_block "$mode" "$spec_path")"
+      if printf '%s' "$methodology" | grep -qE '__MODEL_[A-Z0-9_]*__|__SPEC_PATH__'; then
+        die "Prompt generation failed: unreplaced placeholder token(s) in methodology (panel/sed drift)"
+      fi
+      printf '%s\n\n---\n\n' "$methodology"
     fi
     cat <<'EOF'
 ## Completion Protocol
@@ -2715,6 +2743,18 @@ cmd_create() {
   mkdir -p "$dir/recon"
   mkdir -p "$dir/images"
 
+  # Concurrency guard: refuse a second headless run for the same spec while one
+  # is live (they would clobber each other's recon/plan artifacts and log). Done
+  # before any GitHub side effect so a rejected run posts no duplicate comment.
+  if [ "$headless" -eq 1 ] && [ -f "$dir/pipeline.pid" ]; then
+    local existing_pid
+    existing_pid="$(cat "$dir/pipeline.pid" 2>/dev/null || true)"
+    if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
+      die "A headless pipeline is already running for this spec (pid $existing_pid). Wait for it, or 'acorn clean $repo $slug' to stop it."
+    fi
+    rm -f "$dir/pipeline.pid"  # stale pid file from a previous run
+  fi
+
   # Decide whether to (re)generate PROMPT.md. A pre-existing PROMPT.md is only
   # safe to reuse if its flavor matches the requested mode: headless wants a lean
   # (methodology-free) prompt, the session flow needs the methodology block. A
@@ -2734,6 +2774,17 @@ cmd_create() {
     if ! grep -q 'PLANNING METHODOLOGY' "$prompt_path"; then
       info "Existing PROMPT.md is the headless flavor; regenerating with methodology for the session flow"
       need_generate=1
+    else
+      # Has methodology, but each mode's methodology differs (6/4/2-stage). If the
+      # existing prompt was generated for a different mode, regenerate — otherwise
+      # the orchestrator would run the wrong stage plan for the requested mode.
+      local existing_mode="full"
+      grep -q 'MANDATORY INSTRUCTIONS (LITE MODE)'  "$prompt_path" && existing_mode="lite"
+      grep -q 'MANDATORY INSTRUCTIONS (QUICK MODE)' "$prompt_path" && existing_mode="quick"
+      if [ "$existing_mode" != "$mode" ]; then
+        info "Existing PROMPT.md is ${existing_mode}-mode; regenerating for ${mode}"
+        need_generate=1
+      fi
     fi
   fi
 
@@ -2759,13 +2810,8 @@ cmd_create() {
         die "Prompt generation failed: planning anchor missing"
       fi
     fi
-    # Guard against interpolation drift: no unreplaced __MODEL_*__ / __SPEC_PATH__
-    # token should ever reach the orchestrator (validate_prompt_md only checks the
-    # anchor line, which survives even when a token substitution is missing).
-    if grep -qE '__MODEL_[A-Z0-9_]*__|__SPEC_PATH__' "$tmp_path"; then
-      rm -f "$tmp_path" "$url_mapping_file"
-      die "Prompt generation failed: unreplaced placeholder token(s) in PROMPT.md (panel/sed drift)"
-    fi
+    # (Interpolation-drift guard now lives inside render_prompt_md, scoped to the
+    # methodology block so it never trips on untrusted issue text.)
     mv "$tmp_path" "$prompt_path"
     rm -f "$url_mapping_file"
     info "Generated $prompt_path"
@@ -2782,19 +2828,25 @@ cmd_create() {
 
   if [ "$headless" -eq 1 ]; then
     write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "headless" "" "$mode"
-    local logf="$dir/pipeline.log"
+    local logf="$dir/pipeline.log" pidf="$dir/pipeline.pid"
     : > "$logf"
-    # Run detached so the terminal is free during long (full-mode) runs. The
-    # nested subshell isolates die() from the recorder, so PIPELINE_EXIT is
-    # always written even when a stage fails.
+    # Run detached so the terminal is free during long (full-mode) runs. Capture
+    # the exit with `|| rc=$?`: `set -e` would otherwise abort the recorder the
+    # moment the nested pipeline subshell fails, before PIPELINE_EXIT is logged,
+    # making a failed run indistinguishable from a still-running one. The pid
+    # file lets `acorn clean` stop an in-flight run and guards concurrent runs.
     (
-      ( run_pipeline "$mode" "$dir" "$repo_main" ) >> "$logf" 2>&1
-      printf 'PIPELINE_EXIT=%s\n' "$?" >> "$logf"
+      rc=0
+      ( run_pipeline "$mode" "$dir" "$repo_main" ) >> "$logf" 2>&1 || rc=$?
+      printf 'PIPELINE_EXIT=%s\n' "$rc" >> "$logf"
+      rm -f "$pidf"
     ) &
+    local bg_pid=$!
+    printf '%s\n' "$bg_pid" > "$pidf"
     disown
     echo ""
     echo "Created spec: $dir"
-    echo "Mode: $mode (headless, running in background)"
+    echo "Mode: $mode (headless, running in background, pid $bg_pid)"
     echo "Log:  $logf"
     echo "Follow: tail -f \"$logf\""
     echo "Spec will land at: $dir/plans/SPEC.md"
@@ -3017,6 +3069,17 @@ cmd_clean() {
 
   kill_session "$backend" "$session_name" "$repo" "$slug"
 
+  # Stop an in-flight headless pipeline before deleting its directory, otherwise
+  # its agents keep running until they fail on the vanished artifact paths.
+  if [ -f "$target/pipeline.pid" ]; then
+    local run_pid
+    run_pid="$(cat "$target/pipeline.pid" 2>/dev/null || true)"
+    if [ -n "$run_pid" ] && kill -0 "$run_pid" 2>/dev/null; then
+      info "Stopping running headless pipeline (pid $run_pid)"
+      kill "$run_pid" 2>/dev/null || true
+    fi
+  fi
+
   rm -rf "$target"
   info "Removed $target"
 
@@ -3188,12 +3251,11 @@ analyze_issue_for_split() {
   # generation-stale full ID. Override per-call with `acorn issue split --model`.
   local model="${4:-sonnet}"
 
-  # Require the model's CLI up front, before creating temp files, so a missing
-  # CLI fails cleanly instead of leaking temps when run_agent dies mid-way.
-  case "$(model_family "$model")" in
-    codex) require_cmds codex jq ;;
-    *)     require_cmds claude jq ;;
-  esac
+  # jq is always needed here; the model's own CLI (claude/codex) is required
+  # inside run_agent AFTER resolve_model, so a codex model with codex absent can
+  # still soft-fall-back to Claude. Temp files below are cleaned by the EXIT trap
+  # even if run_agent dies, so we don't need an up-front CLI check.
+  require_cmds jq
 
   local prompt
   prompt="$(cat <<'SPLIT_PROMPT_EOF'

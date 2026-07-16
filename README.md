@@ -588,6 +588,8 @@ bash test/test_labels.sh
 bash test/test_auto_trigger.sh
 bash test/test_split.sh
 bash test/test_dependencies.sh
+bash test/test_run_agent.sh
+bash test/test_pipeline.sh
 
 # Run full suites including integration tests
 # (creates temporary GitHub issues, verifies image/label flows, cleans up)

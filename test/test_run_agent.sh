@@ -85,6 +85,10 @@ test_extract_json() {
   local mixed
   mixed=$'Example:\n```bash\necho hi\n```\nAnswer:\n```json\n{"should_split":false}\n```'
   assert_eq "prefers json-tagged fence over earlier fence" "$(extract_json "$mixed")" '{"should_split":false}'
+  # Two generic (untagged) fences must NOT be concatenated; take the first block.
+  local twogen
+  twogen=$'```\n{"a":1}\n```\ntext\n```\n{"b":2}\n```'
+  assert_eq "first generic fence only (no concat)" "$(extract_json "$twogen")" '{"a":1}'
   local ec=0
   ( extract_json "not json at all" >/dev/null 2>&1 ) || ec=$?
   if [ "$ec" -ne 0 ]; then pass "non-json fails"; else fail "non-json fails" "expected non-zero"; fi
@@ -125,17 +129,21 @@ test_run_agent_claude() {
   assert_contains "claude json used --output-format" "$(cat "$arglog")" "--output-format json"
   assert_contains "claude json got --model sonnet" "$(cat "$arglog")" "--model sonnet"
 
-  # SECURITY: never pass --dangerously-skip-permissions; default (none) grants no tools
+  # SECURITY: never skip-permissions; default (none) hard-denies dangerous tools
+  # via --disallowedTools and pre-authorizes no tools.
   : > "$arglog"; export CLAUDE_RESULT="ok"
   printf 'p' | run_agent opus "$out" --format text
   if grep -qF -- "--dangerously-skip-permissions" "$arglog"; then fail "no skip-permissions (default)" "flag present"; else pass "no skip-permissions (default)"; fi
-  if grep -qF -- "--allowedTools" "$arglog"; then fail "no tools by default" "--allowedTools present"; else pass "no tools by default"; fi
+  assert_contains "default disallows Bash/Write/Edit" "$(cat "$arglog")" "--disallowedTools"
+  assert_contains "disallow list content" "$(cat "$arglog")" "Bash Write Edit"
+  if grep -qF -- "--allowedTools" "$arglog"; then fail "no allowlist by default" "--allowedTools present"; else pass "no allowlist by default"; fi
 
-  # --tools read grants Read/Glob/Grep only, still no skip-permissions
+  # --tools read allowlists Read/Glob/Grep AND still hard-denies the rest
   : > "$arglog"
   printf 'p' | run_agent opus "$out" --format text --tools read
   assert_contains "read policy allowlists tools" "$(cat "$arglog")" "--allowedTools"
   assert_contains "read policy is read-only set"  "$(cat "$arglog")" "Read Glob Grep"
+  assert_contains "read policy still disallows"   "$(cat "$arglog")" "--disallowedTools"
   if grep -qF -- "--dangerously-skip-permissions" "$arglog"; then fail "no skip-permissions (read)" "flag present"; else pass "no skip-permissions (read)"; fi
 
   unset -f claude; unset ARGLOG CLAUDE_RESULT ACORN_CODEX
@@ -158,6 +166,16 @@ test_run_agent_atomic() {
   assert_eq "prior artifact preserved on failure" "$(cat "$out")" "PRIOR-GOOD-SPEC"
   # No stray tmp files left behind
   if ls "$out".tmp.* >/dev/null 2>&1; then fail "no leftover tmp" "tmp files remain"; else pass "no leftover tmp"; fi
+
+  # A zero-exit but EMPTY response must also not clobber the prior artifact.
+  unset -f claude
+  claude() { cat >/dev/null; printf ''; }   # exit 0, no output
+  export -f claude
+  ec=0
+  printf 'p' | run_agent opus "$out" --format text 2>/dev/null || ec=$?
+  [ "$ec" -ne 0 ] && pass "empty-but-ok call returns non-zero" || fail "empty-but-ok call returns non-zero" "got 0"
+  assert_eq "prior preserved on empty success" "$(cat "$out")" "PRIOR-GOOD-SPEC"
+
   unset -f claude; unset ACORN_CODEX
   rm -f "$out"
 }
