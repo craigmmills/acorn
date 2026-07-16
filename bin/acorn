@@ -46,8 +46,9 @@ Pipeline modes (per-stage models come from the panel; see README "Model panel"):
   (default)   Full 6-stage pipeline — 14 agents, Sonnet recon + mixed planning
   --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus draft/spec, Sonnet validation
   --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
-  --headless  Run the pipeline in-process (no tmux/Task tool); routes gpt-* panel
-              entries to real Codex agents. Currently supports --quick only.
+  --headless  Run the pipeline in-process (no tmux/Task tool), routing gpt-* panel
+              entries to real Codex agents. Works with full/lite/quick and runs
+              in the background, logging to <spec>/pipeline.log.
 
 Dependency management:
   acorn issue depends <repo> <issue#>                       Show dependencies
@@ -1880,53 +1881,241 @@ Ground every claim in the actual codebase and reference real file paths. Do NOT 
 EOF
 }
 
+# draft_prompt <lens> <spec_dir_abs>   lens: minimal|architecture|robustness|dx
+draft_prompt() {
+  local lens="$1" spec_dir="$2"
+  printf 'Produce a complete, independent implementation plan for the feature described in %s/PROMPT.md.\n\n' "$spec_dir"
+  printf 'Read %s/recon/architecture.md, %s/recon/relevant_code.md, and %s/recon/conventions.md for codebase context, and explore further with Glob/Grep/Read where you need to confirm a detail.\n\n' "$spec_dir" "$spec_dir" "$spec_dir"
+  case "$lens" in
+    minimal)      printf '%s\n' 'YOUR LENS — Minimal Surgery: achieve the requirements with the smallest possible change set. Touch the fewest files, reuse what exists, avoid new abstractions, and prefer modifying existing code over adding new files.' ;;
+    architecture) printf '%s\n' 'YOUR LENS — Clean Architecture: design the cleanest long-term structure, with proper separation of concerns and clear interfaces, even if that means a larger change. Optimise for how the code should be shaped, not for minimal diff.' ;;
+    robustness)   printf '%s\n' 'YOUR LENS — Robustness First: put correctness, edge cases, and failure modes at the centre. Handle error paths and boundary conditions explicitly, and validate at system boundaries.' ;;
+    dx)           printf '%s\n' 'YOUR LENS — Developer Experience: optimise for clarity, testability, and maintainability. Make the change easy to understand, easy to test, and pleasant to work on later.' ;;
+    *) die "draft_prompt: unknown lens '$lens'" ;;
+  esac
+  printf '\n%s\n' 'Give the plan the full treatment through this lens: overview, files to change with the specific change in each, a step-by-step implementation order, data/API changes, testing approach, and edge cases. Commit to the lens even where a different lens would choose otherwise. Ground every claim in the real codebase with file paths. Do NOT create or write any files — your reply IS the plan. Output only the plan markdown.'
+}
+
+# evaluate_prompt <spec_dir_abs>
+evaluate_prompt() {
+  local spec_dir="$1"
+  cat <<EOF
+Evaluate four competing implementation plans for the same feature and recommend a path forward.
+
+Read the requirements in ${spec_dir}/PROMPT.md, the codebase context in ${spec_dir}/recon/, and the four drafts:
+- ${spec_dir}/plans/draft_plan_1.md (minimal surgery lens)
+- ${spec_dir}/plans/draft_plan_2.md (clean architecture lens)
+- ${spec_dir}/plans/draft_plan_3.md (robustness lens)
+- ${spec_dir}/plans/draft_plan_4.md (developer experience lens)
+
+Score each draft on: requirement coverage, fit with the existing codebase and conventions, simplicity, risk, and testability. For each, give its strongest ideas and its weaknesses. Then recommend which draft (or which combination of ideas from several) should form the basis of the master plan, and say why.
+
+Ground your judgements in the drafts and the codebase. Do NOT create or write any files — your reply IS the evaluation. Output only the evaluation markdown.
+EOF
+}
+
+# synthesis_prompt <spec_dir_abs>
+synthesis_prompt() {
+  local spec_dir="$1"
+  cat <<EOF
+Synthesise a single master implementation plan from four competing drafts and their evaluation.
+
+Read ${spec_dir}/PROMPT.md, ${spec_dir}/recon/, the four drafts in ${spec_dir}/plans/draft_plan_1..4.md, and the scoring in ${spec_dir}/plans/evaluation.md.
+
+Produce the master plan: take the best ideas from each draft, resolve conflicts between them deliberately (state the call you made and why), and cover overview, files to change with the specific change in each, step-by-step implementation order, data/API changes, testing strategy, and edge cases. It should be coherent as one plan, not a stapling-together of four.
+
+Ground every claim in the real codebase with file paths. Do NOT create or write any files — your reply IS the master plan. Output only the master plan markdown.
+EOF
+}
+
+# redteam_prompt <angle> <spec_dir_abs>   angle: requirements|ambiguity|edge|integration
+redteam_prompt() {
+  local angle="$1" spec_dir="$2"
+  printf 'You are an adversarial reviewer. Your job is to find what is WRONG or MISSING in the master plan at %s/plans/master_plan.md, not to praise it.\n\n' "$spec_dir"
+  printf 'Read %s/PROMPT.md (the requirements) and %s/recon/ for context, and check the plan against the real codebase with Glob/Grep/Read.\n\n' "$spec_dir" "$spec_dir"
+  case "$angle" in
+    requirements) printf '%s\n' 'ANGLE — Requirements coverage: go requirement by requirement from PROMPT.md. Is each one addressed in the plan, and where exactly? Is each acceptance criterion testable and unambiguous? What is missing or only partially covered?' ;;
+    ambiguity)    printf '%s\n' 'ANGLE — Ambiguity: find every place two competent developers would implement the plan differently, where information a developer needs is missing, or where the plan relies on implicit knowledge. Assume the least charitable reading.' ;;
+    edge)         printf '%s\n' 'ANGLE — Edge cases and failure modes: find the inputs, states, and error paths the plan does not handle. Empty/oversized/malformed inputs, concurrency, partial failure, rollback, and boundary conditions.' ;;
+    integration)  printf '%s\n' 'ANGLE — Integration and ordering: find broken or unstated integration points, wrong dependency ordering, unhandled side effects, and backward-compatibility or migration problems with existing code.' ;;
+    *) die "redteam_prompt: unknown angle '$angle'" ;;
+  esac
+  printf '\n%s\n' 'List concrete, specific findings (each with where in the plan and why it matters); do not soften them. If the plan genuinely handles something well in your area, say so briefly, but lead with the problems. Do NOT create or write any files — your reply IS the review. Output only the findings markdown.'
+}
+
+# final_spec_prompt <spec_dir_abs>   (full mode: resolve red-team findings into SPEC.md)
+final_spec_prompt() {
+  local spec_dir="$1"
+  cat <<EOF
+Produce the final, implementation-ready SPEC.md by hardening the master plan against four adversarial reviews.
+
+Read ${spec_dir}/PROMPT.md, ${spec_dir}/recon/, the master plan ${spec_dir}/plans/master_plan.md, and the four red-team reviews ${spec_dir}/plans/red_team_1..4.md.
+
+Produce a SPEC.md an implementing agent can follow without guessing. Cover:
+- A short overview of what is being built and why.
+- The concrete files to create or change, and the specific change in each.
+- A step-by-step implementation plan in dependency order.
+- Data model, schema, and API / interface changes.
+- Testing strategy: what to test and how, matching this repo's test conventions.
+- Edge cases and failure modes to handle.
+- A traceability check mapping each acceptance criterion from PROMPT.md to where the plan satisfies it.
+- A red-team resolution log: for each material finding from the four reviews, how the spec addresses it (or a reasoned decision not to).
+
+Ground every claim in the real codebase and reference file paths. Do NOT create or write any files — your reply IS the spec. Output only the spec markdown.
+EOF
+}
+
+# lite_draft_prompt <spec_dir_abs>   (lite mode: one comprehensive draft)
+lite_draft_prompt() {
+  local spec_dir="$1"
+  cat <<EOF
+Produce a single, comprehensive implementation plan for the feature in ${spec_dir}/PROMPT.md.
+
+Read ${spec_dir}/recon/architecture.md, ${spec_dir}/recon/relevant_code.md, and ${spec_dir}/recon/conventions.md, and explore further with Glob/Grep/Read where needed.
+
+Balance the concerns a strong engineer weighs at once: a small, clean change that reuses what exists; correctness and edge cases; and testability. Cover overview, files to change with the specific change in each, step-by-step order, data/API changes, testing approach, and edge cases.
+
+Ground every claim in the real codebase with file paths. Do NOT create or write any files — your reply IS the plan. Output only the plan markdown.
+EOF
+}
+
+# lite_validate_prompt <spec_dir_abs>   (lite mode: validate the single draft)
+lite_validate_prompt() {
+  local spec_dir="$1"
+  cat <<EOF
+Validate an implementation plan against the requirements and the real codebase before it becomes the final spec.
+
+Read ${spec_dir}/PROMPT.md, ${spec_dir}/recon/, and the plan at ${spec_dir}/plans/draft_plan_1.md. Check the plan against the actual code with Glob/Grep/Read.
+
+Report, concretely: (1) requirement coverage — is each requirement and acceptance criterion addressed and testable; (2) codebase fact-check — does the plan reference the code accurately, or are there wrong assumptions; (3) ambiguities a developer would hit; (4) edge cases and failure modes the plan misses. Be specific about where and why.
+
+Do NOT create or write any files — your reply IS the validation report. Output only the findings markdown.
+EOF
+}
+
+# lite_spec_prompt <spec_dir_abs>   (lite mode: incorporate validation into SPEC.md)
+lite_spec_prompt() {
+  local spec_dir="$1"
+  cat <<EOF
+Produce the final, implementation-ready SPEC.md by incorporating validation findings into the plan.
+
+Read ${spec_dir}/PROMPT.md, ${spec_dir}/recon/, the plan ${spec_dir}/plans/draft_plan_1.md, and the validation report ${spec_dir}/plans/validation.md.
+
+Produce a SPEC.md an implementing agent can follow without guessing, folding in every material validation finding. Cover:
+- A short overview of what is being built and why.
+- The concrete files to create or change, and the specific change in each.
+- A step-by-step implementation plan in dependency order.
+- Data model, schema, and API / interface changes.
+- Testing strategy: what to test and how, matching this repo's test conventions.
+- Edge cases and failure modes to handle.
+- A traceability check mapping each acceptance criterion from PROMPT.md to where the plan satisfies it.
+
+Ground every claim in the real codebase and reference file paths. Do NOT create or write any files — your reply IS the spec. Output only the spec markdown.
+EOF
+}
+
+# _run_fanout <label> <repo_main> [<model> <out> <prompt>]...
+# Launches each (model, out, prompt) agent in parallel (read-only tools), waits
+# for all, and dies if any artifact is missing/empty.
+_run_fanout() {
+  local label="$1" repo_main="$2"
+  shift 2
+  info "$label"
+  local pids=() outs=() rc=0
+  while [ "$#" -ge 3 ]; do
+    local model="$1" out="$2" prompt="$3"
+    shift 3
+    printf '%s' "$prompt" | run_agent "$model" "$out" --format text --cwd "$repo_main" --tools read &
+    pids+=("$!"); outs+=("$out")
+  done
+  local pid; for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+  local o; for o in "${outs[@]}"; do
+    [ -s "$o" ] || { warn "agent artifact missing or empty: $o"; rc=1; }
+  done
+  [ "$rc" -eq 0 ] || die "$label failed — see warnings above"
+}
+
+# run_single_stage <label> <model> <out> <repo_main> <prompt>
+run_single_stage() {
+  local label="$1" model="$2" out="$3" repo_main="$4" prompt="$5"
+  info "$label (model=$model)"
+  printf '%s' "$prompt" | run_agent "$model" "$out" --format text --cwd "$repo_main" --tools read \
+    || die "$label failed"
+  [ -s "$out" ] || die "$label produced no output ($out)"
+}
+
+# run_recon <model> <spec_dir_abs> <repo_main_abs>  (3 facets in parallel)
+run_recon() {
+  local model="$1" spec_dir="$2" repo_main="$3"
+  _run_fanout "Stage 0: reconnaissance (3 agents, model=$model)" "$repo_main" \
+    "$model" "$spec_dir/recon/architecture.md"  "$(recon_prompt architecture "$spec_dir")" \
+    "$model" "$spec_dir/recon/relevant_code.md" "$(recon_prompt relevant_code "$spec_dir")" \
+    "$model" "$spec_dir/recon/conventions.md"   "$(recon_prompt conventions "$spec_dir")"
+  info "Stage 0 complete: recon/{architecture,relevant_code,conventions}.md"
+}
+
 # run_pipeline <mode> <spec_dir_abs> <repo_main_abs>
 run_pipeline() {
   local mode="$1" spec_dir="$2" repo_main="$3"
   case "$mode" in
     quick) run_pipeline_quick "$spec_dir" "$repo_main" ;;
-    lite|full) die "Headless orchestration for '$mode' mode is not implemented yet (the Phase 2 tracer bullet covers quick mode). Run without --headless to use the session-based flow, or use --quick." ;;
+    lite)  run_pipeline_lite  "$spec_dir" "$repo_main" ;;
+    full)  run_pipeline_full  "$spec_dir" "$repo_main" ;;
     *) die "run_pipeline: unknown mode '$mode'" ;;
   esac
 }
 
-# Fan out N recon facets in parallel; fail if any artifact is missing/empty.
-run_recon_stage() {
-  local model="$1" spec_dir="$2" repo_main="$3"
-  info "Stage 0: reconnaissance (3 agents, model=${model})"
-  local facets=(architecture relevant_code conventions)
-  local pids=() facet pid rc=0
-  for facet in "${facets[@]}"; do
-    recon_prompt "$facet" "$spec_dir" \
-      | run_agent "$model" "$spec_dir/recon/${facet}.md" --format text --cwd "$repo_main" --tools read &
-    pids+=("$!")
-  done
-  for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
-  for facet in "${facets[@]}"; do
-    if [ ! -s "$spec_dir/recon/${facet}.md" ]; then
-      warn "recon artifact missing or empty: recon/${facet}.md"
-      rc=1
-    fi
-  done
-  [ "$rc" -eq 0 ] || die "Stage 0 (recon) failed — see warnings above"
-  info "Stage 0 complete: recon/{architecture,relevant_code,conventions}.md"
-}
-
 run_pipeline_quick() {
   local spec_dir="$1" repo_main="$2"
-  local m_recon m_spec
-  m_recon="$(panel_model quick:recon)"
-  m_spec="$(panel_model quick:spec)"
-  info "Headless pipeline (quick): recon=${m_recon}, spec=${m_spec}"
-
-  run_recon_stage "$m_recon" "$spec_dir" "$repo_main"
-
-  info "Stage 1: final spec (1 agent, model=${m_spec})"
-  quick_spec_prompt "$spec_dir" \
-    | run_agent "$m_spec" "$spec_dir/plans/SPEC.md" --format text --cwd "$repo_main" --tools read \
-    || die "Stage 1 (spec) failed"
-  [ -s "$spec_dir/plans/SPEC.md" ] || die "SPEC.md was not produced"
+  info "Headless pipeline (quick): recon=$(panel_model quick:recon), spec=$(panel_model quick:spec)"
+  run_recon "$(panel_model quick:recon)" "$spec_dir" "$repo_main"
+  run_single_stage "Stage 1: final spec" "$(panel_model quick:spec)" \
+    "$spec_dir/plans/SPEC.md" "$repo_main" "$(quick_spec_prompt "$spec_dir")"
   info "Stage 1 complete: plans/SPEC.md"
+}
+
+run_pipeline_lite() {
+  local spec_dir="$1" repo_main="$2"
+  info "Headless pipeline (lite): recon=$(panel_model lite:recon), draft=$(panel_model lite:draft), validate=$(panel_model lite:validate), spec=$(panel_model lite:spec)"
+  run_recon "$(panel_model lite:recon)" "$spec_dir" "$repo_main"
+  run_single_stage "Stage 1: comprehensive draft" "$(panel_model lite:draft)" \
+    "$spec_dir/plans/draft_plan_1.md" "$repo_main" "$(lite_draft_prompt "$spec_dir")"
+  run_single_stage "Stage 2: validation" "$(panel_model lite:validate)" \
+    "$spec_dir/plans/validation.md" "$repo_main" "$(lite_validate_prompt "$spec_dir")"
+  run_single_stage "Stage 3: final spec" "$(panel_model lite:spec)" \
+    "$spec_dir/plans/SPEC.md" "$repo_main" "$(lite_spec_prompt "$spec_dir")"
+  info "Pipeline complete: plans/SPEC.md"
+}
+
+run_pipeline_full() {
+  local spec_dir="$1" repo_main="$2"
+  info "Headless pipeline (full): recon=$(panel_model full:recon), drafts=[$(panel_model full:draft:minimal)/$(panel_model full:draft:architecture)/$(panel_model full:draft:robustness)/$(panel_model full:draft:dx)], synth=$(panel_model full:synthesize), spec=$(panel_model full:spec)"
+
+  run_recon "$(panel_model full:recon)" "$spec_dir" "$repo_main"
+
+  _run_fanout "Stage 1: diverse drafting (4 agents)" "$repo_main" \
+    "$(panel_model full:draft:minimal)"      "$spec_dir/plans/draft_plan_1.md" "$(draft_prompt minimal "$spec_dir")" \
+    "$(panel_model full:draft:architecture)" "$spec_dir/plans/draft_plan_2.md" "$(draft_prompt architecture "$spec_dir")" \
+    "$(panel_model full:draft:robustness)"   "$spec_dir/plans/draft_plan_3.md" "$(draft_prompt robustness "$spec_dir")" \
+    "$(panel_model full:draft:dx)"           "$spec_dir/plans/draft_plan_4.md" "$(draft_prompt dx "$spec_dir")"
+  info "Stage 1 complete: 4 drafts"
+
+  run_single_stage "Stage 2: evaluation" "$(panel_model full:evaluate)" \
+    "$spec_dir/plans/evaluation.md" "$repo_main" "$(evaluate_prompt "$spec_dir")"
+
+  run_single_stage "Stage 3: synthesis" "$(panel_model full:synthesize)" \
+    "$spec_dir/plans/master_plan.md" "$repo_main" "$(synthesis_prompt "$spec_dir")"
+
+  _run_fanout "Stage 4: adversarial red team (4 agents)" "$repo_main" \
+    "$(panel_model full:redteam:1)" "$spec_dir/plans/red_team_1.md" "$(redteam_prompt requirements "$spec_dir")" \
+    "$(panel_model full:redteam:2)" "$spec_dir/plans/red_team_2.md" "$(redteam_prompt ambiguity "$spec_dir")" \
+    "$(panel_model full:redteam:3)" "$spec_dir/plans/red_team_3.md" "$(redteam_prompt edge "$spec_dir")" \
+    "$(panel_model full:redteam:4)" "$spec_dir/plans/red_team_4.md" "$(redteam_prompt integration "$spec_dir")"
+  info "Stage 4 complete: 4 red-team reviews"
+
+  run_single_stage "Stage 5: final spec" "$(panel_model full:spec)" \
+    "$spec_dir/plans/SPEC.md" "$repo_main" "$(final_spec_prompt "$spec_dir")"
+  info "Pipeline complete: plans/SPEC.md"
 }
 
 get_extension_from_url() {
@@ -2502,12 +2691,6 @@ cmd_create() {
     shift
   done
 
-  # Reject unsupported combinations BEFORE any GitHub side effects (labeling,
-  # commenting) so a bad invocation never half-initializes an issue.
-  if [ "$headless" -eq 1 ] && [ "$mode" != "quick" ]; then
-    die "--headless currently supports --quick only (got mode: $mode). Run with --quick, or without --headless for the session flow."
-  fi
-
   # Headless drives the pipeline in-process (no tmux); the session flow needs tmux.
   if [ "$headless" -eq 1 ]; then
     require_cmds gh jq claude
@@ -2599,15 +2782,23 @@ cmd_create() {
 
   if [ "$headless" -eq 1 ]; then
     write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "headless" "" "$mode"
+    local logf="$dir/pipeline.log"
+    : > "$logf"
+    # Run detached so the terminal is free during long (full-mode) runs. The
+    # nested subshell isolates die() from the recorder, so PIPELINE_EXIT is
+    # always written even when a stage fails.
+    (
+      ( run_pipeline "$mode" "$dir" "$repo_main" ) >> "$logf" 2>&1
+      printf 'PIPELINE_EXIT=%s\n' "$?" >> "$logf"
+    ) &
+    disown
     echo ""
     echo "Created spec: $dir"
-    echo "Mode: $mode (headless)"
-    echo "Running the pipeline now — this can take several minutes."
-    echo ""
-    run_pipeline "$mode" "$dir" "$repo_main"
-    echo ""
-    echo "Pipeline complete. Spec: $dir/plans/SPEC.md"
-    echo "Mark ready for review: acorn spec-complete $repo $slug"
+    echo "Mode: $mode (headless, running in background)"
+    echo "Log:  $logf"
+    echo "Follow: tail -f \"$logf\""
+    echo "Spec will land at: $dir/plans/SPEC.md"
+    echo "When done: acorn spec-complete $repo $slug"
     return 0
   fi
 

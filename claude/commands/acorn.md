@@ -41,7 +41,7 @@ acorn deps graph <repo> <issue#> [<issue#>...]                        # Build wa
 - `--lite` — Use lite 4-stage pipeline (6 agents, Sonnet recon + Opus planning)
 - `--quick` — Use quick 2-stage pipeline (4 agents, Sonnet recon + Opus direct spec)
 - `--no-auto` — Don't auto-trigger the planning pipeline
-- `--headless` — Run the pipeline in-process (no tmux, no Task tool). acorn fans out the stages itself, routing `gpt-*` panel entries to real Codex agents (which the session/Task flow can't launch). Runs in the foreground until the spec lands. Currently supports `--quick` only.
+- `--headless` — Run the pipeline in-process (no tmux, no Task tool). acorn fans out the stages itself, routing `gpt-*` panel entries to real Codex agents (which the session/Task flow can't launch). Works with full/lite/quick. Runs in the background and logs to `<spec>/pipeline.log`; the spec lands at `plans/SPEC.md`.
 
 ## Options for issue create/plan
 

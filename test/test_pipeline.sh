@@ -52,6 +52,21 @@ test_prompt_builders() {
   assert_contains "spec reads recon architecture" "$spec" "/S/recon/architecture.md"
   assert_contains "spec reads recon relevant"     "$spec" "/S/recon/relevant_code.md"
   assert_contains "spec asks for traceability"    "$spec" "traceability"
+
+  # Full-mode stage prompts
+  assert_contains "draft minimal lens"   "$(draft_prompt minimal /S)"      "Minimal Surgery"
+  assert_contains "draft dx lens"        "$(draft_prompt dx /S)"           "Developer Experience"
+  assert_not_contains "draft de-prescribed" "$(draft_prompt minimal /S)"   "SUB-AGENT"
+  assert_contains "evaluate reads drafts" "$(evaluate_prompt /S)"          "/S/plans/draft_plan_4.md"
+  assert_contains "synthesis reads eval" "$(synthesis_prompt /S)"          "/S/plans/evaluation.md"
+  assert_contains "redteam edge angle"   "$(redteam_prompt edge /S)"       "Edge cases"
+  assert_contains "redteam reads master" "$(redteam_prompt requirements /S)" "/S/plans/master_plan.md"
+  assert_contains "final spec reads red team" "$(final_spec_prompt /S)"    "/S/plans/red_team_1..4.md"
+  assert_contains "final spec resolution log" "$(final_spec_prompt /S)"    "red-team resolution log"
+  # Lite-mode stage prompts
+  assert_contains "lite draft comprehensive" "$(lite_draft_prompt /S)"     "comprehensive implementation plan"
+  assert_contains "lite validate reads draft" "$(lite_validate_prompt /S)" "/S/plans/draft_plan_1.md"
+  assert_contains "lite spec reads validation" "$(lite_spec_prompt /S)"    "/S/plans/validation.md"
 }
 
 # ──────────────────────────────────────
@@ -75,16 +90,69 @@ test_lean_prompt_md() {
 }
 
 # ──────────────────────────────────────
-# run_pipeline dispatcher
+# run_pipeline dispatcher: unknown mode dies
 # ──────────────────────────────────────
 test_dispatcher() {
   printf '\n\033[1m== run_pipeline dispatcher ==\033[0m\n'
   local ec=0
-  ( run_pipeline lite /tmp/s /tmp/r >/dev/null 2>&1 ) || ec=$?
-  [ "$ec" -ne 0 ] && pass "lite not yet implemented" || fail "lite not yet implemented" "expected die"
-  ec=0
-  ( run_pipeline full /tmp/s /tmp/r >/dev/null 2>&1 ) || ec=$?
-  [ "$ec" -ne 0 ] && pass "full not yet implemented" || fail "full not yet implemented" "expected die"
+  ( run_pipeline bogus /tmp/s /tmp/r >/dev/null 2>&1 ) || ec=$?
+  [ "$ec" -ne 0 ] && pass "unknown mode dies" || fail "unknown mode dies" "expected die"
+}
+
+# Shared stub: record model, consume prompt, write a marker to each out file.
+_stub_run_agent() {
+  run_agent() {
+    local model="$1" out="$2"
+    cat >/dev/null
+    printf 'STUB model=%s\n' "$model" > "$out"
+  }
+}
+
+# ──────────────────────────────────────
+# run_pipeline_lite orchestration (stubbed run_agent)
+# ──────────────────────────────────────
+test_lite_orchestration() {
+  printf '\n\033[1m== run_pipeline_lite (stubbed run_agent) ==\033[0m\n'
+  local spec repo
+  spec="$(mktemp -d)"; repo="$(mktemp -d)"
+  mkdir -p "$spec/recon" "$spec/plans"; printf '# Feature\n' > "$spec/PROMPT.md"
+  _stub_run_agent
+  run_pipeline_lite "$spec" "$repo" >/dev/null 2>&1
+  assert_file_contains "lite recon architecture" "$spec/recon/architecture.md" "model=sonnet"
+  assert_file_contains "lite draft written"      "$spec/plans/draft_plan_1.md" "model=opus"
+  assert_file_contains "lite validation on sonnet" "$spec/plans/validation.md" "model=sonnet"
+  assert_file_contains "lite SPEC on opus"       "$spec/plans/SPEC.md"         "model=opus"
+  unset -f run_agent; rm -rf "$spec" "$repo"
+}
+
+# ──────────────────────────────────────
+# run_pipeline_full orchestration (stubbed run_agent)
+# ──────────────────────────────────────
+test_full_orchestration() {
+  printf '\n\033[1m== run_pipeline_full (stubbed run_agent) ==\033[0m\n'
+  local spec repo
+  spec="$(mktemp -d)"; repo="$(mktemp -d)"
+  mkdir -p "$spec/recon" "$spec/plans"; printf '# Feature\n' > "$spec/PROMPT.md"
+  _stub_run_agent
+  run_pipeline_full "$spec" "$repo" >/dev/null 2>&1
+
+  # All 14 artifacts land
+  local f
+  for f in recon/architecture.md recon/relevant_code.md recon/conventions.md \
+           plans/draft_plan_1.md plans/draft_plan_2.md plans/draft_plan_3.md plans/draft_plan_4.md \
+           plans/evaluation.md plans/master_plan.md \
+           plans/red_team_1.md plans/red_team_2.md plans/red_team_3.md plans/red_team_4.md \
+           plans/SPEC.md; do
+    [ -s "$spec/$f" ] && pass "full artifact $f" || fail "full artifact $f" "missing/empty"
+  done
+
+  # Heterogeneous drafter panel routes for real (no --claude-only in headless):
+  # draft 1 gets the codex model, draft 4 gets Fable, final spec gets Fable.
+  assert_file_contains "draft 1 -> codex (gpt)" "$spec/plans/draft_plan_1.md" "model=gpt-5.6-sol"
+  assert_file_contains "draft 4 -> fable"       "$spec/plans/draft_plan_4.md" "model=fable"
+  assert_file_contains "red team 1 -> codex"    "$spec/plans/red_team_1.md"   "model=gpt-5.6-sol"
+  assert_file_contains "final SPEC -> fable"    "$spec/plans/SPEC.md"         "model=fable"
+  unset -f run_agent; rm -rf "$spec" "$repo"
 }
 
 # ──────────────────────────────────────
@@ -168,6 +236,8 @@ test_prompt_builders
 test_lean_prompt_md
 test_dispatcher
 test_quick_orchestration
+test_lite_orchestration
+test_full_orchestration
 test_quick_recon_failure
 test_sed_escape
 
