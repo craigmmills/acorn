@@ -160,9 +160,9 @@ test_cmd_issue_plan_blocked_by_and_flags() {
   local seen_create=""
   cmd_create() { seen_create="$1|$2|$3|$4"; }
 
-  cmd_issue_plan "repo" "Plan title" --blocked-by "9,10" --lite --no-auto --raw >/dev/null 2>&1
+  cmd_issue_plan "repo" "Plan title" --blocked-by "9,10" --lite --no-run --raw >/dev/null 2>&1
   assert_eq "plan blocked-by forwarded" "$seen_dep" "/tmp/repo|88|9|10"
-  assert_eq "plan create flags forwarded" "$seen_create" "repo|88|--lite|--no-auto"
+  assert_eq "plan create flags forwarded" "$seen_create" "repo|88|--lite|--no-run"
 }
 
 test_cmd_issue_depends_view() {

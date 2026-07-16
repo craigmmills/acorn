@@ -5,12 +5,12 @@ Turns GitHub issues into agent-ready implementation specs via a multi-agent plan
 ## Quick Reference
 
 ```bash
-acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]  # Create spec from issue, start planning
+acorn create <repo> <issue-number> [--no-run] [--lite | --quick]   # Create spec from issue, run pipeline headlessly in background
 acorn list [repo] [--deps]                                           # List all specs and their status (optional dependency counts)
-acorn status [repo]                                                  # Show session dashboard
+acorn status [repo]                                                  # Show pipeline dashboard
 acorn approve <repo> <slug>                                          # Approve a completed spec
 acorn spec-complete <repo> <slug>                                    # Mark SPEC.md as ready for review
-acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]        # Remove spec + kill session
+acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]        # Stop pipeline + remove spec
 acorn issue create <repo> <title> [options]                          # Create a GitHub issue (interactive template)
 acorn issue plan <repo> <title> [options] [--lite | --quick]         # Create issue + start spec immediately
 acorn issue clarify <repo> <issue-number>                            # Swap ai-drafted -> human-clarified, triage -> ready-for-spec
@@ -24,24 +24,25 @@ acorn deps graph <repo> <issue#> [<issue#>...]                        # Build wa
 
 | Mode | Flag | Stages | Agents | Recon | Planning | Best For |
 |------|------|--------|--------|-------|----------|----------|
-| Full | _(default)_ | 6 | 14 | Opus | Opus | Complex features |
-| Lite | `--lite` | 4 | 6 | Sonnet | Opus | Standard features |
+| Full | _(default)_ | 6 | 14 | Sonnet | Mixed (Codex/Opus/Sonnet/Fable) | Complex features |
+| Lite | `--lite` | 4 | 6 | Sonnet | Opus (Sonnet validation) | Standard features |
 | Quick | `--quick` | 2 | 4 | Sonnet | Opus | Simple features |
 
 ## Workflow
 
-1. **Start spec**: `acorn create <repo> <issue#> [--lite | --quick]` — fetches the issue, generates PROMPT.md, launches Claude Code in a detached tmux session, and auto-triggers the planning pipeline.
-2. **Monitor**: `tmux attach -t <session>` to watch progress.
+1. **Start spec**: `acorn create <repo> <issue#> [--lite | --quick]` — fetches the issue, generates a lean PROMPT.md, and runs the pipeline headlessly in the background (acorn shells out to `claude -p` / `codex exec`), logging to `<spec>/pipeline.log`.
+2. **Monitor**: `tail -f <spec>/pipeline.log` and `acorn status` (RUN column) to watch progress.
 3. **Mark ready for review**: `acorn spec-complete <repo> <slug>` — sets `spec-review` after `plans/SPEC.md` is ready.
 4. **Review/Approve**: Review `plans/SPEC.md`, then run `acorn approve <repo> <slug>` to set `spec-approved`.
-5. **Clean up**: `acorn clean <repo> <slug> --yes` — kills session and removes spec directory. **Safety:** refuses to delete if SPEC.md exists and the issue is still open (use `--force` to override).
+5. **Clean up**: `acorn clean <repo> <slug> --yes` — stops any in-flight pipeline and removes the spec directory. **Safety:** refuses to delete if SPEC.md exists and the issue is still open (use `--force` to override).
 
 ## Options for create / issue plan
 
 - `--lite` — Use lite 4-stage pipeline (6 agents, Sonnet recon + Opus planning)
 - `--quick` — Use quick 2-stage pipeline (4 agents, Sonnet recon + Opus direct spec)
-- `--no-auto` — Don't auto-trigger the planning pipeline
-- `--headless` — Run the pipeline in-process (no tmux, no Task tool). acorn fans out the stages itself, routing `gpt-*` panel entries to real Codex agents (which the session/Task flow can't launch). Works with full/lite/quick. Runs in the background and logs to `<spec>/pipeline.log`; the spec lands at `plans/SPEC.md`.
+- `--no-run` — Prepare the spec (PROMPT.md + labels) without launching the pipeline
+
+By default `acorn create` runs the pipeline headlessly in a detached background process. acorn fans out the stages itself, shelling out to `claude -p` and `codex exec` in parallel and routing `gpt-*` panel entries to real Codex agents. It logs to `<spec>/pipeline.log` and the spec lands at `plans/SPEC.md`.
 
 ## Options for issue create/plan
 
@@ -158,18 +159,18 @@ acorn list [repo] --deps
 | `review` | Legacy fallback: plans/SPEC.md exists and no lifecycle label found |
 | `unknown` | Legacy fallback: no lifecycle label + no local state signal |
 
-## Session dashboard
+## Pipeline dashboard
 
-`acorn status [repo]` shows a live dashboard of all spec sessions:
+`acorn status [repo]` shows a live dashboard of all spec pipelines:
 
 | Column | Shows |
 |--------|-------|
 | REPO | Repository name |
 | SLUG | Spec slug (truncated to 40 chars) |
-| SESSION | `running` / `dead` / `no-session` |
-| BACKEND | Session backend from meta.json (`tmux`, or `headless` for `--headless` runs) |
+| RUN | Pipeline run-state: `running` / `done` / `failed` / `stopped` / `idle` (from `pipeline.pid` being alive and `PIPELINE_EXIT` in `pipeline.log`) |
 | STATUS | Lifecycle label (or legacy fallback `planning` / `review` / `unknown`) |
-| ATTACH | `tmux attach -t <session>` command (if running) |
+| MODE | Pipeline mode (`full` / `lite` / `quick`) |
+| SPEC | Whether `plans/SPEC.md` exists yet |
 
 ## Pipeline stages by mode
 
@@ -205,8 +206,10 @@ acorn list [repo] --deps
 Specs are created at `~/Projects/<repo>/main/.specs/<issue#>-<slug>/`:
 ```
 .specs/<slug>/
-  PROMPT.md              # Generated requirements + planning methodology
-  meta.json              # Metadata (repo, issue, session info, mode)
+  PROMPT.md              # Lean requirements + discussion for agents to Read
+  meta.json              # Metadata (repo, issue_number, issue_title, slug, created_at, mode)
+  pipeline.log           # Background pipeline output (tail -f to follow)
+  pipeline.pid           # pid of the running pipeline (used by status / clean)
   images/                # Downloaded images from the GitHub issue
     <hash>.png             (auto-downloaded, URLs rewritten in PROMPT.md)
   recon/                         Full  Lite  Quick
@@ -248,4 +251,4 @@ Issues with screenshots, mockups, or diagrams are automatically handled:
 
 ## Dependencies
 
-Requires: `gh` (authenticated), `jq`, `tmux`, `claude` (Claude Code CLI).
+Requires: `gh` (authenticated), `jq`, `claude` (Claude Code CLI). Optional: `codex` (Codex CLI, authenticated via `codex login`) to run `gpt-*` panel entries as real Codex agents; without it those entries fall back to Claude.

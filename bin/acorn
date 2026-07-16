@@ -11,15 +11,6 @@ LIFECYCLE_LABELS=("triage" "ready-for-spec" "spec-in-progress" "spec-review" "sp
 CLARIFICATION_LABELS=("ai-drafted" "human-clarified")
 _SHOW_DEPS=0
 _LIST_NWO=""
-auto_trigger_message() {
-  local spec_path="$1"
-  local mode="${2:-full}"
-  case "$mode" in
-    full)  printf 'Read %s/PROMPT.md and follow ALL instructions in it to execute the full 6-stage planning pipeline. Start with Stage 0 (Recon). Write all output files to %s/' "$spec_path" "$spec_path" ;;
-    lite)  printf 'Read %s/PROMPT.md and follow ALL instructions in it to execute the lite 4-stage planning pipeline. Start with Stage 0 (Recon). Write all output files to %s/' "$spec_path" "$spec_path" ;;
-    quick) printf 'Read %s/PROMPT.md and follow ALL instructions in it to execute the quick 2-stage planning pipeline. Start with Stage 0 (Recon). Write all output files to %s/' "$spec_path" "$spec_path" ;;
-  esac
-}
 
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*" >&2; }
@@ -28,27 +19,30 @@ die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage:
-  acorn create <repo> <issue-number> [--no-auto] [--headless] [--lite | --quick]
+  acorn create <repo> <issue-number> [--no-run] [--lite | --quick]
   acorn list [repo] [--deps]
   acorn status [repo]
   acorn approve <repo> <slug>
   acorn spec-complete <repo> <slug>
   acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
   acorn issue create <repo> <title> [--body <text> | --body-file <path> | --raw] [--label <name>]... [--assignee <login>]... [--blocked-by <issue#>[,<issue#>...]]
-  acorn issue plan <repo> <title> [options] [--blocked-by <issue#>[,<issue#>...]] [--no-auto] [--lite | --quick]
+  acorn issue plan <repo> <title> [options] [--blocked-by <issue#>[,<issue#>...]] [--no-run] [--lite | --quick]
   acorn issue clarify <repo> <issue-number>
   acorn issue label <repo> <issue-number> <label>
   acorn issue split <repo> <issue-number> [--yes] [--model <model>]
   acorn issue depends <repo> <issue#> [--blocked-by <issue#>[,<issue#>...]] [--remove-blocked-by <issue#>[,<issue#>...]]
   acorn deps graph <repo> <issue#> [<issue#>...]
 
+acorn create runs the pipeline headlessly (acorn shells out to claude -p and
+codex exec directly; no tmux, no Task tool) in the background, logging to
+<spec>/pipeline.log; the spec lands at <spec>/plans/SPEC.md. --no-run prepares
+the spec (PROMPT.md + labels) without launching the pipeline.
+
 Pipeline modes (per-stage models come from the panel; see README "Model panel"):
-  (default)   Full 6-stage pipeline — 14 agents, Sonnet recon + mixed planning
-  --lite      Lite 4-stage pipeline — 6 agents, Sonnet recon + Opus draft/spec, Sonnet validation
-  --quick     Quick 2-stage pipeline — 4 agents, Sonnet recon + Opus direct spec
-  --headless  Run the pipeline in-process (no tmux/Task tool), routing gpt-* panel
-              entries to real Codex agents. Works with full/lite/quick and runs
-              in the background, logging to <spec>/pipeline.log.
+  (default)   Full 6-stage pipeline, 14 agents: recon, 4 drafts, evaluate,
+              synthesize, 4 red team, final spec (Codex/Opus/Sonnet/Fable)
+  --lite      Lite 4-stage pipeline, 6 agents: recon, draft, validate, spec
+  --quick     Quick 2-stage pipeline, 4 agents: recon, direct spec
 
 Dependency management:
   acorn issue depends <repo> <issue#>                       Show dependencies
@@ -185,14 +179,6 @@ panel_model() {
     return 0
   fi
   printf '%s' "$raw"
-}
-
-# Escape a string for safe use as sed replacement text in `s|__TOK__|HERE|g`.
-# Backslash, ampersand (whole-match), and the `|` delimiter must be escaped, or
-# a value like an ACORN_PANEL_* override containing `&`/`|` corrupts or breaks
-# the substitution.
-sed_rep_escape() {
-  printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
 }
 
 # Pull the first valid JSON object out of model output. Tiers, in order:
@@ -396,13 +382,6 @@ build_slug() {
   printf '%s-%s' "$issue_number" "$(slugify_title "$title")"
 }
 
-canonical_session_name() {
-  local repo="$1"
-  local slug="$2"
-  local session="${repo}/specs/${slug}/claude"
-  session="$(printf '%s' "$session" | sed -E 's#[[:space:]/]+#_#g; s/[^A-Za-z0-9_.-]/-/g; s/_+/_/g; s/-+/-/g')"
-  printf '%s' "$session"
-}
 
 issue_number_from_slug() {
   local slug="$1"
@@ -795,973 +774,9 @@ topological_sort_waves() {
   done
 }
 
-planning_block() {
-  local mode="${1:-full}"
-  local spec_path="${2:-.}"
-  case "$mode" in
-    full)  planning_block_full "$spec_path" ;;
-    lite)  planning_block_lite "$spec_path" ;;
-    quick) planning_block_quick "$spec_path" ;;
-    *)     die "Unknown planning mode: $mode" ;;
-  esac
-}
 
-planning_block_full() {
-  local spec_path="${1:-.}"
-  # Per-stage models come from the panel (single source of truth). --claude-only
-  # forces any codex-family entry to its Claude fallback, because the Claude Code
-  # Task tool that runs this pipeline cannot launch Codex agents (see Phase 2).
-  # Values are sed-escaped (sed_rep_escape) so an ACORN_PANEL_* override or spec
-  # path containing & / | / \ cannot corrupt or break the substitution.
-  local sp m_recon m_dmin m_darch m_drob m_ddx m_eval m_synth m_rt1 m_rt2 m_rt3 m_rt4 m_spec
-  sp="$(sed_rep_escape "$spec_path")"
-  m_recon="$(sed_rep_escape "$(panel_model full:recon --claude-only)")"
-  m_dmin="$(sed_rep_escape "$(panel_model full:draft:minimal --claude-only)")"
-  m_darch="$(sed_rep_escape "$(panel_model full:draft:architecture --claude-only)")"
-  m_drob="$(sed_rep_escape "$(panel_model full:draft:robustness --claude-only)")"
-  m_ddx="$(sed_rep_escape "$(panel_model full:draft:dx --claude-only)")"
-  m_eval="$(sed_rep_escape "$(panel_model full:evaluate --claude-only)")"
-  m_synth="$(sed_rep_escape "$(panel_model full:synthesize --claude-only)")"
-  m_rt1="$(sed_rep_escape "$(panel_model full:redteam:1 --claude-only)")"
-  m_rt2="$(sed_rep_escape "$(panel_model full:redteam:2 --claude-only)")"
-  m_rt3="$(sed_rep_escape "$(panel_model full:redteam:3 --claude-only)")"
-  m_rt4="$(sed_rep_escape "$(panel_model full:redteam:4 --claude-only)")"
-  m_spec="$(sed_rep_escape "$(panel_model full:spec --claude-only)")"
-  cat <<'METHODOLOGY_EOF' | sed \
-    -e "s|__SPEC_PATH__|${sp}|g" \
-    -e "s|__MODEL_RECON__|${m_recon}|g" \
-    -e "s|__MODEL_DRAFT_MINIMAL__|${m_dmin}|g" \
-    -e "s|__MODEL_DRAFT_ARCH__|${m_darch}|g" \
-    -e "s|__MODEL_DRAFT_ROB__|${m_drob}|g" \
-    -e "s|__MODEL_DRAFT_DX__|${m_ddx}|g" \
-    -e "s|__MODEL_EVAL__|${m_eval}|g" \
-    -e "s|__MODEL_SYNTH__|${m_synth}|g" \
-    -e "s|__MODEL_RT1__|${m_rt1}|g" \
-    -e "s|__MODEL_RT2__|${m_rt2}|g" \
-    -e "s|__MODEL_RT3__|${m_rt3}|g" \
-    -e "s|__MODEL_RT4__|${m_rt4}|g" \
-    -e "s|__MODEL_SPEC__|${m_spec}|g"
-## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS
 
-> **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
->
-> When the user says "let's draft this" (or any variation like "draft it", "start planning", "go", etc.),
-> you MUST execute the 6-stage multi-agent pipeline described below.
->
-> **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
->
-> If you write ANY plan content yourself instead of delegating to sub-agents via the Task tool,
-> you have FAILED. Your ONLY job is to launch Task agents and wait for them to finish.
 
-> **RULES FOR SUB-AGENTS (include these in every sub-agent prompt):**
->
-> - Sub-agents write ALL work to files using Write/Edit tools
-> - Sub-agents return ONLY: `Done. Output: [filepath]`
-> - Sub-agents MUST write in chunks of ~4000 tokens max (Write tool, then Edit to append)
-> - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
-> - Violation of these rules will blow up the orchestrator's context window
-
-> **VISUAL ASSETS:** The GitHub issue may include images (screenshots, mockups, diagrams) downloaded
-> to `__SPEC_PATH__/images/`. Sub-agents should use the Read tool to examine any images when relevant.
-
----
-
-### Overview
-
-You MUST execute these 6 stages in order. Each stage MUST use the Task tool to launch sub-agents.
-You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the work yourself.
-
-0. **Stage 0**: YOU launch 3 parallel Task agents → each explores the codebase from a different angle
-1. **Stage 1**: YOU launch 4 parallel Task agents → each drafts an independent plan with a distinct architectural lens
-2. **Stage 2**: YOU launch 1 Task agent → scores all 4 drafts against a structured rubric
-3. **Stage 3**: YOU launch 1 Task agent → synthesizes a master plan using scored drafts
-4. **Stage 4**: YOU launch 4 parallel Task agents → each adversarially red-teams the master plan
-5. **Stage 5**: YOU launch 1 Task agent → produces final SPEC.md with traceability
-
-Total: 14 Task agent launches across 6 stages (Stage 0 through Stage 5). No shortcuts.
-
----
-
-### Stage 0: Codebase Reconnaissance
-
-YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "__MODEL_RECON__".
-
-**Each agent explores the actual codebase to ground all subsequent work in reality.**
-
-**Agent A — Architecture & Structure:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to understand:
-  - Directory layout and project structure
-  - Tech stack, frameworks, and languages used
-  - Build system and deployment model
-  - Key entry points and main modules
-  - Database schemas and data layer architecture
-  - If __SPEC_PATH__/images/ exists, use the Read tool to examine any images for visual context (screenshots, mockups, diagrams)
-- Write your findings to __SPEC_PATH__/recon/architecture.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Focus on FACTS about the codebase, not opinions. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/architecture.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Agent B — Relevant Code:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to identify:
-  - Files and modules most likely to be modified for this feature
-  - Existing APIs, endpoints, and interfaces relevant to the feature
-  - Data models, types, and schemas that would be affected
-  - Integration points with external services or systems
-  - Related existing functionality that the feature would interact with
-- Write your findings to __SPEC_PATH__/recon/relevant_code.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/relevant_code.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Agent C — Conventions & Constraints:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to document:
-  - Coding style and naming conventions used throughout
-  - Error handling patterns (how errors are thrown, caught, reported)
-  - Test framework, test file naming, test patterns and helpers
-  - CI/CD configuration and quality gates
-  - Dependency management approach
-  - Existing abstractions and utilities that should be reused
-  - Any CLAUDE.md, AGENTS.md, or contributing guidelines
-- Write your findings to __SPEC_PATH__/recon/conventions.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Include concrete examples from the codebase. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/conventions.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After all 3 complete:** Confirm all 3 files exist (__SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, __SPEC_PATH__/recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
-
----
-
-### Stage 1: Diverse Parallel Drafting
-
-YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Assign each drafter its own model: Drafter A = "__MODEL_DRAFT_MINIMAL__", Drafter B = "__MODEL_DRAFT_ARCH__", Drafter C = "__MODEL_DRAFT_ROB__", Drafter D = "__MODEL_DRAFT_DX__".
-Each sub-agent gets a distinct architectural lens that forces genuinely different approaches.
-
-**Drafter A — Minimal Surgery lens:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Minimal Surgery drafter. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- YOUR LENS: Achieve the requirements with the SMALLEST possible change set. Touch the fewest files. Reuse everything that exists. Avoid new abstractions. Prefer modifying existing code over creating new files.
-- Write a detailed, complete implementation plan to __SPEC_PATH__/plans/draft_plan_1.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
-- Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft_plan_1.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Drafter B — Clean Architecture lens:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Clean Architecture drafter. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- YOUR LENS: Design the RIGHT abstraction. Proper separation of concerns, clear interfaces, extensibility. Accept more files changed if the architecture is better. Think about how this feature fits into the broader system.
-- Write a detailed, complete implementation plan to __SPEC_PATH__/plans/draft_plan_2.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
-- Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft_plan_2.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Drafter C — Robustness-First lens:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Robustness-First drafter. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- YOUR LENS: Start from FAILURE MODES. What can go wrong? Design error handling, validation, and edge cases FIRST. Testing strategy drives the architecture. Every path must have explicit error handling. Consider rollback and recovery.
-- Write a detailed, complete implementation plan to __SPEC_PATH__/plans/draft_plan_3.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
-- Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft_plan_3.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Drafter D — Developer Experience lens:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Developer Experience drafter. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- YOUR LENS: Optimize for the NEXT DEVELOPER who reads this code. Simplicity over cleverness. Clear naming. Obvious control flow. Minimal cognitive load. If a junior developer would struggle to understand it, simplify it.
-- Write a detailed, complete implementation plan to __SPEC_PATH__/plans/draft_plan_4.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Cover: architecture, specific file changes, data models, API design, error handling, testing strategy, migration plan.
-- Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft_plan_4.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After all 4 complete:** Confirm all 4 files exist, then proceed to Stage 2. Do NOT read the files.
-
----
-
-### Stage 2: Rubric-Based Evaluation
-
-YOU MUST launch 1 Task tool call. Use model "__MODEL_EVAL__".
-
-**This replaces free-form critique with structured scoring. One evaluator scores all 4 drafts comparatively.**
-
-**Prompt:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Rubric Evaluator. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- Read ALL of: __SPEC_PATH__/plans/draft_plan_1.md through __SPEC_PATH__/plans/draft_plan_4.md (4 drafts total).
-
-Score EACH draft against this rubric (1-5 scale for each dimension):
-
-**Requirements Coverage (1-5):**
-  5 = Every requirement from the issue maps to a specific section with testable acceptance criteria
-  3 = Most requirements addressed but some are vague or missing acceptance criteria
-  1 = Multiple requirements missing or only superficially addressed
-
-**Implementability (1-5):**
-  5 = A developer could follow this with zero questions — exact file paths, function signatures, step-by-step order
-  3 = Generally clear but some steps require interpretation or assumption
-  1 = Vague hand-waving, missing specifics, ambiguous instructions
-
-**Codebase Consistency (1-5):**
-  5 = Follows all conventions from recon, builds on existing abstractions, respects patterns
-  3 = Mostly consistent but ignores some existing patterns or reinvents existing utilities
-  1 = Ignores existing code, introduces conflicting patterns, doesn't match the codebase style
-
-**Completeness (1-5):**
-  5 = Error handling, testing strategy, migration plan, and rollback all addressed
-  3 = Happy path well-covered but error handling or testing partially addressed
-  1 = Only covers the happy path, no error handling or testing strategy
-
-**Feasibility (1-5):**
-  5 = Every step is concrete and verified against the actual codebase from recon
-  3 = Generally feasible but some assumptions may not hold
-  1 = Contains assumptions contradicted by the recon documents
-
-**Risk Identification (1-5):**
-  5 = Risks identified with specific mitigations and fallback plans
-  3 = Some risks noted but mitigations are vague
-  1 = No risk acknowledgement
-
-Your output MUST include:
-- A score table: each draft scored on each dimension with a brief justification per score
-- A comparative ranking: which draft is strongest overall and on which dimensions
-- Strengths to preserve: the best ideas from each draft that the synthesizer should adopt
-- Weaknesses to avoid: specific flaws from each draft that the synthesizer must not repeat
-- Gap analysis: requirements or concerns not adequately addressed by ANY draft
-
-- Write your evaluation to __SPEC_PATH__/plans/evaluation.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/evaluation.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After completion:** Confirm the file exists, then proceed to Stage 3. Do NOT read the file.
-
----
-
-### Stage 3: Weighted Synthesis
-
-YOU MUST launch 1 Task tool call. Use model "__MODEL_SYNTH__".
-
-**The synthesizer receives pre-scored drafts so it can make informed trade-offs.**
-
-**Prompt:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Synthesis agent. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- Read ALL of: __SPEC_PATH__/plans/draft_plan_1.md through __SPEC_PATH__/plans/draft_plan_4.md (4 drafts).
-- Read __SPEC_PATH__/plans/evaluation.md (the rubric scores and comparative analysis).
-
-Synthesize a master implementation plan using the evaluation to guide decisions:
-  - For dimensions where one draft clearly leads in score: adopt that draft's approach for those aspects
-  - Where all drafts agree: adopt directly as high-confidence decisions
-  - Where drafts disagree: use evaluation scores + codebase recon to resolve, explain the choice
-  - Incorporate every strength flagged by the evaluator
-  - Avoid every weakness flagged by the evaluator
-  - Address every gap identified in the gap analysis
-  - The resulting plan must score 4+ on every rubric dimension
-
-- Write the master plan to __SPEC_PATH__/plans/master_plan.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/master_plan.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After completion:** Confirm the file exists, then proceed to Stage 4. Do NOT read the file.
-
----
-
-### Stage 4: Adversarial Red Team
-
-YOU MUST launch 4 Task tool calls in a SINGLE message (parallel execution). Assign each agent its own model: Red Team A = "__MODEL_RT1__", Red Team B = "__MODEL_RT2__", Red Team C = "__MODEL_RT3__", Red Team D = "__MODEL_RT4__".
-
-**These are ADVERSARIAL agents. Their job is to BREAK the spec, not cooperate with it.**
-
-**Red Team A — Requirements Auditor:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Requirements Auditor. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/plans/master_plan.md — this is the plan you must audit.
-
-YOUR MISSION: Systematically verify every requirement from the original issue.
-For EACH requirement in __SPEC_PATH__/PROMPT.md:
-  - Is it addressed in the master plan? WHERE exactly (quote the relevant section)?
-  - Is the acceptance criteria testable and specific?
-  - Could a developer implement it differently than intended due to ambiguity?
-  - What's missing?
-
-Produce a REQUIREMENTS COVERAGE MATRIX as a table:
-| Requirement | Addressed? | Location in Plan | Testable? | Gaps/Ambiguities |
-
-- Write your audit to __SPEC_PATH__/plans/red_team_1.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/red_team_1.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Red Team B — Ambiguity Hunter:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Ambiguity Hunter. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- Read __SPEC_PATH__/plans/master_plan.md — this is the plan you must attack.
-
-YOUR MISSION: Try to implement each section of this spec and find where you would get STUCK.
-For each major section of the plan:
-  - What information is missing that a developer would need?
-  - What has multiple valid interpretations?
-  - Where would two developers implement it differently?
-  - What requires implicit knowledge not stated in the spec?
-  - What order-of-operations dependencies are unstated?
-
-Be adversarial. Assume the worst interpretation. Find every ambiguity.
-
-- Write your findings to __SPEC_PATH__/plans/red_team_2.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/red_team_2.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Red Team C — Codebase Validator:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Codebase Validator. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/plans/master_plan.md — this is the plan you must validate.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-
-YOUR MISSION: Read the ACTUAL CODEBASE and verify every factual claim in the master plan.
-Use Glob, Grep, and Read tools to check:
-  - Do referenced files and directories actually exist?
-  - Are function signatures and API contracts correct?
-  - Do data models and schemas match what's described?
-  - Are import paths and module references valid?
-  - Does the plan correctly describe existing behavior it claims to modify?
-  - Are there existing utilities or helpers the plan reinvents instead of reusing?
-
-For every factual error, document: what the plan claims vs what the codebase actually shows.
-
-- Write your validation report to __SPEC_PATH__/plans/red_team_3.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/red_team_3.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Red Team D — Contradiction & Edge Case Finder:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Contradiction & Edge Case Finder. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/plans/master_plan.md — this is the plan you must attack.
-
-YOUR MISSION: Find internal contradictions, edge cases, and failure modes.
-  - Find sections of the plan that CONTRADICT each other
-  - Find ordering dependencies that would BREAK if steps are done out of order
-  - Find edge cases NOT handled (empty inputs, concurrent access, partial failures, large data, etc.)
-  - Find error paths NOT covered (network failures, auth failures, invalid data, timeouts)
-  - Find assumptions that would FAIL in production (race conditions, resource limits, permissions)
-  - Find security concerns (injection, auth bypass, data exposure, privilege escalation)
-
-Be adversarial. Think like a chaos engineer. What breaks under stress?
-
-- Write your findings to __SPEC_PATH__/plans/red_team_4.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/red_team_4.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After all 4 complete:** Confirm all 4 files exist, then proceed to Stage 5. Do NOT read the files.
-
----
-
-### Stage 5: Final Spec with Traceability
-
-YOU MUST launch 1 Task tool call. Use model "__MODEL_SPEC__".
-
-**Prompt:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Final Spec agent. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- Read __SPEC_PATH__/plans/master_plan.md (the master plan).
-- Read ALL of: __SPEC_PATH__/plans/red_team_1.md through __SPEC_PATH__/plans/red_team_4.md (4 red team reports).
-
-Produce the FINAL, COMPLETE implementation specification. It MUST include:
-
-1. **Requirements Traceability Matrix**: For each requirement from the original issue, the exact
-   section of this spec that addresses it. Any requirement NOT addressed must be flagged as a gap
-   with explicit justification for why it was deferred.
-
-2. **Red Team Resolution Log**: For each finding from the 4 red team reports, document:
-   - The finding (one-line summary)
-   - Resolution: how it was fixed in this spec, OR why it was deferred (with justification)
-   - Deferred items must include severity and recommended follow-up
-
-3. **Implementation Plan**: Step-by-step instructions with:
-   - Specific file paths and function signatures
-   - Data models and schema changes
-   - Implementation order with dependencies between steps
-   - Each step must be independently verifiable
-
-4. **Testing Strategy**: Grounded in the actual test framework and patterns found in recon.
-   - Unit tests, integration tests, and edge case tests
-   - Specific test file locations and naming conventions
-   - Test data and fixture requirements
-
-5. **Risk Register**: Unresolved risks with severity, likelihood, and mitigation strategies.
-
-The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
-
-- Write the final spec to __SPEC_PATH__/plans/SPEC.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/SPEC.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After completion:** Read __SPEC_PATH__/plans/SPEC.md and present it to the user. This is the ONLY file you read.
-
----
-
-### Orchestrator Context Management — CRITICAL
-
-**Your context is precious. Sub-agents have their own 200k token contexts. You do NOT.**
-
-- Your ONLY job is to launch Task agents and confirm they completed. That's it.
-- You need ~1k tokens per stage. If your context grows beyond ~20k tokens, you broke a rule.
-- NEVER read sub-agent output files yourself (the ONLY exception: __SPEC_PATH__/plans/SPEC.md at the very end)
-- NEVER consume sub-agent return messages beyond confirming the word "Done"
-- NEVER write plan content yourself — that's what the 14 sub-agents are for
-- If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
-METHODOLOGY_EOF
-}
-
-planning_block_lite() {
-  local spec_path="${1:-.}"
-  # Per-stage models from the panel; --claude-only forces codex entries to their
-  # Claude fallback (the Task tool cannot launch Codex agents; see Phase 2).
-  local sp m_recon m_draft m_validate m_spec
-  sp="$(sed_rep_escape "$spec_path")"
-  m_recon="$(sed_rep_escape "$(panel_model lite:recon --claude-only)")"
-  m_draft="$(sed_rep_escape "$(panel_model lite:draft --claude-only)")"
-  m_validate="$(sed_rep_escape "$(panel_model lite:validate --claude-only)")"
-  m_spec="$(sed_rep_escape "$(panel_model lite:spec --claude-only)")"
-  cat <<'METHODOLOGY_EOF' | sed \
-    -e "s|__SPEC_PATH__|${sp}|g" \
-    -e "s|__MODEL_RECON__|${m_recon}|g" \
-    -e "s|__MODEL_DRAFT__|${m_draft}|g" \
-    -e "s|__MODEL_VALIDATE__|${m_validate}|g" \
-    -e "s|__MODEL_SPEC__|${m_spec}|g"
-## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (LITE MODE)
-
-> **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
->
-> When the user says "let's draft this" (or any variation like "draft it", "start planning", "go", etc.),
-> you MUST execute the 4-stage lite pipeline described below.
->
-> **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
->
-> If you write ANY plan content yourself instead of delegating to sub-agents via the Task tool,
-> you have FAILED. Your ONLY job is to launch Task agents and wait for them to finish.
-
-> **RULES FOR SUB-AGENTS (include these in every sub-agent prompt):**
->
-> - Sub-agents write ALL work to files using Write/Edit tools
-> - Sub-agents return ONLY: `Done. Output: [filepath]`
-> - Sub-agents MUST write in chunks of ~4000 tokens max (Write tool, then Edit to append)
-> - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
-> - Violation of these rules will blow up the orchestrator's context window
-
-> **VISUAL ASSETS:** The GitHub issue may include images (screenshots, mockups, diagrams) downloaded
-> to `__SPEC_PATH__/images/`. Sub-agents should use the Read tool to examine any images when relevant.
-
----
-
-### Overview
-
-This is the **lite pipeline** — a faster alternative to the full 6-stage pipeline.
-It trades multi-draft competition and adversarial red-teaming for speed while keeping
-codebase-grounded recon and dedicated validation.
-
-You MUST execute these 4 stages in order. Each stage MUST use the Task tool to launch sub-agents.
-You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the work yourself.
-
-0. **Stage 0**: YOU launch 3 parallel Task agents → each explores the codebase from a different angle
-1. **Stage 1**: YOU launch 1 Task agent → drafts a single comprehensive plan balancing all architectural lenses
-2. **Stage 2**: YOU launch 1 Task agent → validates the draft against requirements, codebase facts, ambiguities, and edge cases
-3. **Stage 3**: YOU launch 1 Task agent → produces final SPEC.md incorporating validation findings
-
-Total: 6 Task agent launches across 4 stages (Stage 0 through Stage 3). No shortcuts.
-
----
-
-### Stage 0: Codebase Reconnaissance
-
-YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "__MODEL_RECON__".
-
-**Each agent explores the actual codebase to ground all subsequent work in reality.**
-
-**Agent A — Architecture & Structure:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to understand:
-  - Directory layout and project structure
-  - Tech stack, frameworks, and languages used
-  - Build system and deployment model
-  - Key entry points and main modules
-  - Database schemas and data layer architecture
-  - If __SPEC_PATH__/images/ exists, use the Read tool to examine any images for visual context (screenshots, mockups, diagrams)
-- Write your findings to __SPEC_PATH__/recon/architecture.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Focus on FACTS about the codebase, not opinions. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/architecture.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Agent B — Relevant Code:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to identify:
-  - Files and modules most likely to be modified for this feature
-  - Existing APIs, endpoints, and interfaces relevant to the feature
-  - Data models, types, and schemas that would be affected
-  - Integration points with external services or systems
-  - Related existing functionality that the feature would interact with
-- Write your findings to __SPEC_PATH__/recon/relevant_code.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/relevant_code.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Agent C — Conventions & Constraints:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to document:
-  - Coding style and naming conventions used throughout
-  - Error handling patterns (how errors are thrown, caught, reported)
-  - Test framework, test file naming, test patterns and helpers
-  - CI/CD configuration and quality gates
-  - Dependency management approach
-  - Existing abstractions and utilities that should be reused
-  - Any CLAUDE.md, AGENTS.md, or contributing guidelines
-- Write your findings to __SPEC_PATH__/recon/conventions.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Include concrete examples from the codebase. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/conventions.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After all 3 complete:** Confirm all 3 files exist (__SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, __SPEC_PATH__/recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
-
----
-
-### Stage 1: Comprehensive Draft
-
-YOU MUST launch 1 Task tool call. Use model "__MODEL_DRAFT__".
-
-**A single drafter balances all four architectural lenses into one comprehensive plan.**
-
-**Prompt:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Plan Drafter. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-
-Draft a comprehensive implementation plan that balances these four perspectives:
-  1. **Minimal Surgery**: Touch the fewest files. Reuse everything that exists. Prefer modifying existing code over creating new files.
-  2. **Clean Architecture**: Proper separation of concerns, clear interfaces, extensibility where it matters.
-  3. **Robustness**: Error handling, validation, edge cases, rollback and recovery paths.
-  4. **Developer Experience**: Simplicity over cleverness. Clear naming. Obvious control flow. Minimal cognitive load.
-
-Cover: architecture, specific file changes with file paths and function signatures, data models, API design, error handling, testing strategy, migration plan, and risks.
-Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-
-- Write your plan to __SPEC_PATH__/plans/draft.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/draft.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After completion:** Confirm the file exists, then proceed to Stage 2. Do NOT read the file.
-
----
-
-### Stage 2: Combined Validation
-
-YOU MUST launch 1 Task tool call. Use model "__MODEL_VALIDATE__".
-
-**A single validator performs requirements coverage, codebase fact-checking, ambiguity audit, and edge case analysis.**
-
-**Prompt:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Plan Validator. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- Read __SPEC_PATH__/plans/draft.md — this is the plan you must validate.
-
-Perform a combined validation covering four areas:
-
-**1. Requirements Coverage:**
-For EACH requirement in __SPEC_PATH__/PROMPT.md:
-  - Is it addressed in the plan? WHERE exactly?
-  - Is the acceptance criteria testable and specific?
-  - What's missing?
-Produce a requirements coverage matrix.
-
-**2. Codebase Fact-Check:**
-Use Glob, Grep, and Read tools to verify every factual claim in the plan:
-  - Do referenced files and directories actually exist?
-  - Are function signatures and API contracts correct?
-  - Do data models and schemas match what's described?
-  - Are there existing utilities the plan reinvents instead of reusing?
-Document every factual error: what the plan claims vs what the codebase actually shows.
-
-**3. Ambiguity Audit:**
-For each major section:
-  - What information is missing that a developer would need?
-  - What has multiple valid interpretations?
-  - What requires implicit knowledge not stated in the plan?
-  - What order-of-operations dependencies are unstated?
-
-**4. Edge Cases & Risks:**
-  - Find edge cases NOT handled (empty inputs, concurrent access, partial failures, large data)
-  - Find error paths NOT covered (network failures, auth failures, invalid data, timeouts)
-  - Find internal contradictions or ordering dependencies that could break
-  - Identify security concerns (injection, auth bypass, data exposure)
-
-- Write your validation report to __SPEC_PATH__/plans/validation.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/validation.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After completion:** Confirm the file exists, then proceed to Stage 3. Do NOT read the file.
-
----
-
-### Stage 3: Final Spec
-
-YOU MUST launch 1 Task tool call. Use model "__MODEL_SPEC__".
-
-**Prompt:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Final Spec agent. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-- Read __SPEC_PATH__/plans/draft.md (the implementation plan).
-- Read __SPEC_PATH__/plans/validation.md (the validation report).
-
-Produce the FINAL, COMPLETE implementation specification. It MUST include:
-
-1. **Requirements Traceability Matrix**: For each requirement from the original issue, the exact
-   section of this spec that addresses it. Any requirement NOT addressed must be flagged as a gap
-   with explicit justification for why it was deferred.
-
-2. **Validation Resolution Log**: For each finding from the validation report, document:
-   - The finding (one-line summary)
-   - Resolution: how it was fixed in this spec, OR why it was deferred (with justification)
-   - Deferred items must include severity and recommended follow-up
-
-3. **Implementation Plan**: Step-by-step instructions with:
-   - Specific file paths and function signatures
-   - Data models and schema changes
-   - Implementation order with dependencies between steps
-   - Each step must be independently verifiable
-
-4. **Testing Strategy**: Grounded in the actual test framework and patterns found in recon.
-   - Unit tests, integration tests, and edge case tests
-   - Specific test file locations and naming conventions
-   - Test data and fixture requirements
-
-5. **Risk Register**: Unresolved risks with severity, likelihood, and mitigation strategies.
-
-The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
-
-- Write the final spec to __SPEC_PATH__/plans/SPEC.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/SPEC.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After completion:** Read __SPEC_PATH__/plans/SPEC.md and present it to the user. This is the ONLY file you read.
-
----
-
-### Orchestrator Context Management — CRITICAL
-
-**Your context is precious. Sub-agents have their own 200k token contexts. You do NOT.**
-
-- Your ONLY job is to launch Task agents and confirm they completed. That's it.
-- You need ~1k tokens per stage. If your context grows beyond ~15k tokens, you broke a rule.
-- NEVER read sub-agent output files yourself (the ONLY exception: __SPEC_PATH__/plans/SPEC.md at the very end)
-- NEVER consume sub-agent return messages beyond confirming the word "Done"
-- NEVER write plan content yourself — that's what the 6 sub-agents are for
-- If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
-METHODOLOGY_EOF
-}
-
-planning_block_quick() {
-  local spec_path="${1:-.}"
-  # Per-stage models from the panel; --claude-only forces codex entries to their
-  # Claude fallback (the Task tool cannot launch Codex agents; see Phase 2).
-  local sp m_recon m_spec
-  sp="$(sed_rep_escape "$spec_path")"
-  m_recon="$(sed_rep_escape "$(panel_model quick:recon --claude-only)")"
-  m_spec="$(sed_rep_escape "$(panel_model quick:spec --claude-only)")"
-  cat <<'METHODOLOGY_EOF' | sed \
-    -e "s|__SPEC_PATH__|${sp}|g" \
-    -e "s|__MODEL_RECON__|${m_recon}|g" \
-    -e "s|__MODEL_SPEC__|${m_spec}|g"
-## PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS (QUICK MODE)
-
-> **YOU ARE THE ORCHESTRATOR. YOU MUST FOLLOW THIS METHODOLOGY EXACTLY.**
->
-> When the user says "let's draft this" (or any variation like "draft it", "start planning", "go", etc.),
-> you MUST execute the 2-stage quick pipeline described below.
->
-> **DO NOT write a plan yourself. DO NOT skip stages. DO NOT summarize instead of launching agents.**
->
-> If you write ANY plan content yourself instead of delegating to sub-agents via the Task tool,
-> you have FAILED. Your ONLY job is to launch Task agents and wait for them to finish.
-
-> **RULES FOR SUB-AGENTS (include these in every sub-agent prompt):**
->
-> - Sub-agents write ALL work to files using Write/Edit tools
-> - Sub-agents return ONLY: `Done. Output: [filepath]`
-> - Sub-agents MUST write in chunks of ~4000 tokens max (Write tool, then Edit to append)
-> - Sub-agents must NEVER return content, summaries, or explanations to the orchestrator
-> - Violation of these rules will blow up the orchestrator's context window
-
-> **VISUAL ASSETS:** The GitHub issue may include images (screenshots, mockups, diagrams) downloaded
-> to `__SPEC_PATH__/images/`. Sub-agents should use the Read tool to examine any images when relevant.
-
----
-
-### Overview
-
-This is the **quick pipeline** — the fastest mode. Recon grounds the spec in the actual codebase,
-then a single agent produces SPEC.md directly. Best for straightforward features where speed matters
-more than multi-perspective analysis.
-
-You MUST execute these 2 stages in order. Each stage MUST use the Task tool to launch sub-agents.
-You MUST NOT skip any stage. You MUST NOT combine stages. You MUST NOT do the work yourself.
-
-0. **Stage 0**: YOU launch 3 parallel Task agents → each explores the codebase from a different angle
-1. **Stage 1**: YOU launch 1 Task agent → reads recon + requirements → produces SPEC.md directly
-
-Total: 4 Task agent launches across 2 stages (Stage 0 and Stage 1). No shortcuts.
-
----
-
-### Stage 0: Codebase Reconnaissance
-
-YOU MUST launch 3 Task tool calls in a SINGLE message (parallel execution). Use model "__MODEL_RECON__".
-
-**Each agent explores the actual codebase to ground all subsequent work in reality.**
-
-**Agent A — Architecture & Structure:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Architecture Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to understand:
-  - Directory layout and project structure
-  - Tech stack, frameworks, and languages used
-  - Build system and deployment model
-  - Key entry points and main modules
-  - Database schemas and data layer architecture
-  - If __SPEC_PATH__/images/ exists, use the Read tool to examine any images for visual context (screenshots, mockups, diagrams)
-- Write your findings to __SPEC_PATH__/recon/architecture.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Focus on FACTS about the codebase, not opinions. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/architecture.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Agent B — Relevant Code:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Relevant Code Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to identify:
-  - Files and modules most likely to be modified for this feature
-  - Existing APIs, endpoints, and interfaces relevant to the feature
-  - Data models, types, and schemas that would be affected
-  - Integration points with external services or systems
-  - Related existing functionality that the feature would interact with
-- Write your findings to __SPEC_PATH__/recon/relevant_code.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Include actual code snippets, function signatures, and type definitions. Reference specific file paths and line numbers.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/relevant_code.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**Agent C — Conventions & Constraints:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Conventions Reconnaissance agent. You are a SUB-AGENT, not the orchestrator.
-- Read the __SPEC_PATH__/PROMPT.md file that the orchestrator provides in your working directory to understand what feature is being planned.
-- Explore the actual codebase using Glob, Grep, and Read tools to document:
-  - Coding style and naming conventions used throughout
-  - Error handling patterns (how errors are thrown, caught, reported)
-  - Test framework, test file naming, test patterns and helpers
-  - CI/CD configuration and quality gates
-  - Dependency management approach
-  - Existing abstractions and utilities that should be reused
-  - Any CLAUDE.md, AGENTS.md, or contributing guidelines
-- Write your findings to __SPEC_PATH__/recon/conventions.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Include concrete examples from the codebase. Reference specific file paths.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/recon/conventions.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After all 3 complete:** Confirm all 3 files exist (__SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, __SPEC_PATH__/recon/conventions.md), then proceed to Stage 1. Do NOT read the files.
-
----
-
-### Stage 1: Direct Spec
-
-YOU MUST launch 1 Task tool call. Use model "__MODEL_SPEC__".
-
-**A single agent reads all recon and requirements, then produces SPEC.md directly — no intermediaries.**
-
-**Prompt:**
-
-```
-CRITICAL SUB-AGENT INSTRUCTIONS:
-- You are the Spec Writer. You are a SUB-AGENT, not the orchestrator.
-- Read __SPEC_PATH__/PROMPT.md for the full requirements.
-- Read __SPEC_PATH__/recon/architecture.md, __SPEC_PATH__/recon/relevant_code.md, and __SPEC_PATH__/recon/conventions.md for codebase context.
-
-Produce a COMPLETE implementation specification. Balance these perspectives:
-  1. **Minimal Surgery**: Reuse existing code, touch the fewest files possible.
-  2. **Clean Architecture**: Proper separation of concerns where it matters.
-  3. **Robustness**: Error handling, validation, edge cases.
-  4. **Developer Experience**: Simplicity, clear naming, obvious control flow.
-
-The spec MUST include:
-
-1. **Requirements Traceability Matrix**: For each requirement from the original issue, the exact
-   section of this spec that addresses it. Any requirement NOT addressed must be flagged as a gap
-   with explicit justification for why it was deferred.
-
-2. **Implementation Plan**: Step-by-step instructions with:
-   - Specific file paths and function signatures
-   - Data models and schema changes
-   - Implementation order with dependencies between steps
-   - Each step must be independently verifiable
-
-3. **Testing Strategy**: Grounded in the actual test framework and patterns found in recon.
-   - Unit tests, integration tests, and edge case tests
-   - Specific test file locations and naming conventions
-   - Test data and fixture requirements
-
-4. **Risk Register**: Known risks with severity, likelihood, and mitigation strategies.
-
-The spec must be ready to be handed to a developer or agent for implementation with ZERO questions.
-Be specific — reference actual file paths, function names, and code patterns from the recon documents.
-
-- Write the final spec to __SPEC_PATH__/plans/SPEC.md
-- Write in chunks of ~4000 tokens maximum. Use Write tool first, then Edit tool to append.
-- Your final response must be ONLY: "Done. Output: __SPEC_PATH__/plans/SPEC.md"
-- Do NOT return any content, summaries, or explanations. ONLY the done message.
-```
-
-**After completion:** Read __SPEC_PATH__/plans/SPEC.md and present it to the user. This is the ONLY file you read.
-
----
-
-### Orchestrator Context Management — CRITICAL
-
-**Your context is precious. Sub-agents have their own 200k token contexts. You do NOT.**
-
-- Your ONLY job is to launch Task agents and confirm they completed. That's it.
-- You need ~1k tokens per stage. If your context grows beyond ~10k tokens, you broke a rule.
-- NEVER read sub-agent output files yourself (the ONLY exception: __SPEC_PATH__/plans/SPEC.md at the very end)
-- NEVER consume sub-agent return messages beyond confirming the word "Done"
-- NEVER write plan content yourself — that's what the 4 sub-agents are for
-- If a sub-agent fails, relaunch it. Do NOT do its work yourself as a fallback.
-METHODOLOGY_EOF
-}
 
 render_comments_block() {
   local issue_json="$1"
@@ -1775,17 +790,14 @@ render_comments_block() {
   '
 }
 
+# PROMPT.md carries only requirements + discussion; the stage plan is code
+# (run_pipeline), not prose. The pipeline's recon/draft/spec agents Read this file.
 render_prompt_md() {
   local issue_title="$1"
   local issue_body="$2"
   local issue_json="$3"
   local out_tmp="$4"
-  local mode="${5:-full}"
-  local spec_path="${6:-.}"
-  local url_mapping_file="${7:-}"
-  # In headless mode the orchestration methodology is code, not prose, so
-  # PROMPT.md carries only requirements + discussion for the agents to read.
-  local include_methodology="${8:-1}"
+  local url_mapping_file="${5:-}"
 
   # Rewrite image URLs in body if mapping exists
   if [ -n "$url_mapping_file" ] && [ -f "$url_mapping_file" ] && [ -s "$url_mapping_file" ]; then
@@ -1809,17 +821,6 @@ render_prompt_md() {
     fi
     printf '%s' "$comments_text"
     printf '\n---\n\n'
-    if [ "$include_methodology" = "1" ]; then
-      # Capture the interpolated methodology separately so the residual-token
-      # guard scans ONLY acorn's own template output, not the untrusted issue
-      # text above (which may legitimately contain a literal __MODEL_X__).
-      local methodology
-      methodology="$(planning_block "$mode" "$spec_path")"
-      if printf '%s' "$methodology" | grep -qE '__MODEL_[A-Z0-9_]*__|__SPEC_PATH__'; then
-        die "Prompt generation failed: unreplaced placeholder token(s) in methodology (panel/sed drift)"
-      fi
-      printf '%s\n\n---\n\n' "$methodology"
-    fi
     cat <<'EOF'
 ## Completion Protocol
 
@@ -1833,11 +834,6 @@ EOF
   } > "$out_tmp"
 }
 
-validate_prompt_md() {
-  local prompt_path="$1"
-  grep -q 'PLANNING METHODOLOGY — MANDATORY INSTRUCTIONS' "$prompt_path" || return 1
-  return 0
-}
 
 # Lean PROMPT.md (headless mode) has no methodology anchor — validate it carries
 # the requirements section instead.
@@ -1870,6 +866,7 @@ recon_prompt() {
   case "$facet" in
     architecture)
       printf '%s\n' 'Focus on architecture and structure: directory layout, tech stack and frameworks, the build and deployment model, key entry points and main modules, and the data layer (schemas, storage). Reference concrete file paths.'
+      printf 'VISUAL ASSETS: if %s/images/ contains screenshots, mockups, or diagrams referenced by the requirements, use the Read tool to examine them for visual context.\n' "$spec_dir"
       ;;
     relevant_code)
       printf '%s\n' 'Focus on the code this feature will touch: the files and modules most likely to change, the existing APIs / endpoints / interfaces involved, the data models and types affected, integration points with other systems, and related existing functionality. Include real function signatures and file:line references.'
@@ -2288,146 +1285,13 @@ rewrite_image_urls_in_text() {
   printf '%s' "$result"
 }
 
-start_session() {
-  local repo="$1"
-  local slug="$2"
-  local spec_path="$3"
-  local auto_trigger="${4:-0}"
-  local session_name
-  session_name="$(canonical_session_name "$repo" "$slug")"
-
-  require_cmds tmux claude
-
-  if tmux has-session -t "$session_name" 2>/dev/null; then
-    printf '%s\n%s' "tmux" "$session_name"
-    return 0
-  fi
-
-  tmux new-session -d -s "$session_name" -c "$spec_path"
-  if [ "$auto_trigger" -eq 1 ]; then
-    tmux send-keys -t "$session_name" "claude --dangerously-skip-permissions" C-m || true
-  else
-    tmux send-keys -t "$session_name" "claude" C-m || true
-  fi
-  printf '%s\n%s' "tmux" "$session_name"
-}
-
-# Wait for Claude Code to show its input prompt in a tmux session.
-# Polls tmux pane content at regular intervals up to a maximum wait time.
-# Returns 0 when the prompt is detected, 1 on timeout.
-# On timeout the caller should proceed anyway (graceful degradation).
-wait_for_claude_ready() {
-  local session_name="$1"
-  local max_wait="${2:-30}"
-  local interval="${3:-2}"
-  local elapsed=0
-
-  while [ "$elapsed" -lt "$max_wait" ]; do
-    local pane_content
-    pane_content="$(tmux capture-pane -t "$session_name" -ep 2>/dev/null || true)"
-    # Strip any residual ANSI escape codes. Use an ANSI-C-quoted literal ESC
-    # ($'\x1b') so BSD/macOS sed (which doesn't interpret \x1b) sees a real
-    # escape byte, not the four characters backslash-x-1-b.
-    pane_content="$(printf '%s' "$pane_content" | sed $'s/\x1b\\[[0-9;]*[a-zA-Z]//g')"
-    # Check the last few lines for Claude Code's prompt. Use the POSIX
-    # [[:space:]] class rather than the GNU-only \s so this matches on BSD grep.
-    if printf '%s' "$pane_content" | tail -n5 | grep -qE '>[[:space:]]*$'; then
-      return 0
-    fi
-    sleep "$interval"
-    elapsed=$((elapsed + interval))
-  done
-
-  return 1
-}
-
-# Send auto-trigger message to a claude session once it is ready.
-# Waits for Claude Code to show its input prompt, then sends the message.
-# Falls back to sending after timeout if prompt is not detected.
-send_auto_trigger() {
-  local session_name="$1"
-  local message="$2"
-  (
-    # Wait for Claude Code to be ready (up to 30s); proceed on timeout (|| true
-    # prevents set -e from killing the subshell when wait_for_claude_ready returns 1)
-    wait_for_claude_ready "$session_name" 30 2 || true
-    tmux send-keys -t "$session_name" -l "$message"
-    sleep 1
-    tmux send-keys -t "$session_name" Enter
-  ) &
-  disown
-}
-
-kill_session() {
-  local backend="$1"
-  local session_name="$2"
-  local repo="$3"
-  local slug="$4"
-
-  if [ -n "$session_name" ] && command -v tmux >/dev/null 2>&1; then
-    if tmux has-session -t "$session_name" 2>/dev/null; then
-      tmux kill-session -t "$session_name" >/dev/null 2>&1 || warn "Failed to kill session $session_name"
-      return 0
-    fi
-  fi
-
-  if command -v tmux >/dev/null 2>&1; then
-    local candidates
-    candidates="$(tmux list-sessions -F '#S' 2>/dev/null | grep -E "(acorn:${repo}:${slug}|${repo}_specs_${slug}_(claude|pi))" || true)"
-    if [ -n "$candidates" ]; then
-      while IFS= read -r s; do
-        [ -n "$s" ] || continue
-        tmux kill-session -t "$s" >/dev/null 2>&1 || warn "Failed killing fallback session $s"
-      done <<< "$candidates"
-    else
-      warn "No active session found for $slug"
-    fi
-  fi
-}
-
-session_state() {
-  local session_name="$1"
-  local has_meta="$2"
-
-  if [ -z "$session_name" ]; then
-    printf 'no-session'
-    return 0
-  fi
-
-  if ! command -v tmux >/dev/null 2>&1; then
-    printf 'unknown'
-    return 0
-  fi
-
-  if tmux has-session -t "$session_name" 2>/dev/null; then
-    printf 'running'
-  elif [ "$has_meta" -eq 1 ]; then
-    printf 'dead'
-  else
-    printf 'no-session'
-  fi
-}
-
-attach_command() {
-  local session_name="$1"
-  local state="$2"
-
-  if [ "$state" = "running" ]; then
-    printf 'tmux attach -t %s' "$session_name"
-  else
-    printf '%s' "—"
-  fi
-}
-
 write_meta_json() {
   local path="$1"
   local repo="$2"
   local issue_number="$3"
   local issue_title="$4"
   local slug="$5"
-  local backend="$6"
-  local session_name="$7"
-  local mode="${8:-full}"
+  local mode="${6:-full}"
 
   local ts
   ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -2438,10 +1302,8 @@ write_meta_json() {
     --arg issue_title "$issue_title" \
     --arg slug "$slug" \
     --arg created_at "$ts" \
-    --arg session_backend "$backend" \
-    --arg session_name "$session_name" \
     --arg mode "$mode" \
-    '{repo:$repo, issue_number:$issue_number, issue_title:$issue_title, slug:$slug, created_at:$created_at, session_backend:$session_backend, session_name:$session_name, mode:$mode}' \
+    '{repo:$repo, issue_number:$issue_number, issue_title:$issue_title, slug:$slug, created_at:$created_at, mode:$mode}' \
     > "$path"
 }
 
@@ -2550,19 +1412,41 @@ print_list_row() {
 }
 
 print_status_header() {
-  printf '%-16s %-42s %-12s %-8s %-18s %s\n' \
-    "REPO" "SLUG" "SESSION" "BACKEND" "STATUS" "ATTACH"
+  printf '%-16s %-42s %-10s %-18s %-6s %s\n' \
+    "REPO" "SLUG" "RUN" "STATUS" "MODE" "SPEC"
 }
 
 print_status_row() {
   local repo="$1"
   local slug="$2"
-  local session="$3"
-  local backend="$4"
-  local status="$5"
-  local attach="$6"
-  printf '%-16s %-42s %-12s %-8s %-18s %s\n' \
-    "$repo" "$slug" "$session" "$backend" "$status" "$attach"
+  local run="$3"
+  local status="$4"
+  local mode="$5"
+  local spec="$6"
+  printf '%-16s %-42s %-10s %-18s %-6s %s\n' \
+    "$repo" "$slug" "$run" "$status" "$mode" "$spec"
+}
+
+# Run state of a headless pipeline from its pid file + log:
+#   running  live pid
+#   done     PIPELINE_EXIT=0 (or SPEC.md present with no log)
+#   failed   PIPELINE_EXIT=<non-zero>
+#   stopped  log started but no exit line and no live pid (killed/crashed)
+#   idle     prepared, never run
+pipeline_run_state() {
+  local dir="$1"
+  if [ -f "$dir/pipeline.pid" ]; then
+    local p; p="$(cat "$dir/pipeline.pid" 2>/dev/null || true)"
+    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then printf 'running'; return 0; fi
+  fi
+  if [ -f "$dir/pipeline.log" ]; then
+    local ex
+    ex="$(grep -oE 'PIPELINE_EXIT=[0-9]+' "$dir/pipeline.log" 2>/dev/null | tail -1 | cut -d= -f2)"
+    if [ "$ex" = "0" ]; then printf 'done'; return 0; fi
+    if [ -n "$ex" ]; then printf 'failed'; return 0; fi
+    printf 'stopped'; return 0
+  fi
+  [ -s "$dir/plans/SPEC.md" ] && printf 'done' || printf 'idle'
 }
 
 list_specs_for_repo() {
@@ -2639,40 +1523,26 @@ list_status_for_repo() {
     local slug
     slug="$(basename "$dir")"
 
-    local session_name="" backend="tmux" has_meta=0
+    local mode="full"
     if [ -f "$dir/meta.json" ]; then
-      has_meta=1
-      session_name="$(jq -r '.session_name // ""' "$dir/meta.json" 2>/dev/null || true)"
-      backend="$(jq -r '.session_backend // "tmux"' "$dir/meta.json" 2>/dev/null || true)"
+      mode="$(jq -r '.mode // "full"' "$dir/meta.json" 2>/dev/null || echo full)"
     fi
 
-    [ -n "$backend" ] && [ "$backend" != "null" ] || backend="tmux"
-
-    local state attach
-    if [ "$backend" = "headless" ]; then
-      # Headless specs have no attachable session; don't synthesize a tmux name
-      # (which session_state would then report as "dead"). Progress is the label
-      # / SPEC.md, shown in the STATUS column.
-      session_name=""
-      state="n/a"
-      attach="-"
-    else
-      if [ -z "$session_name" ] || [ "$session_name" = "null" ]; then
-        session_name="$(canonical_session_name "$repo" "$slug")"
-      fi
-      state="$(session_state "$session_name" "$has_meta")"
-      attach="$(attach_command "$session_name" "$state")"
-    fi
+    local run_state
+    run_state="$(pipeline_run_state "$dir")"
 
     local issue
     issue="$(issue_number_from_slug "$slug")"
     local pipeline_status
     pipeline_status="$(status_for_spec "$repo_main" "$issue" "$dir")"
 
+    local spec_marker="-"
+    [ -s "$dir/plans/SPEC.md" ] && spec_marker="SPEC.md"
+
     local display_slug
     display_slug="$(truncate_str "$slug" 40)"
 
-    print_status_row "$repo" "$display_slug" "$state" "$backend" "$pipeline_status" "$attach"
+    print_status_row "$repo" "$display_slug" "$run_state" "$pipeline_status" "$mode" "$spec_marker"
   done
 }
 
@@ -2693,16 +1563,12 @@ cmd_create() {
   local issue_number="$2"
   shift 2
 
-  local auto_trigger=1
   local mode="full"
-  local headless=0
+  local run_now=1
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --no-auto)
-        auto_trigger=0
-        ;;
-      --headless)
-        headless=1
+      --no-run)
+        run_now=0
         ;;
       --lite)
         [ "$mode" = "full" ] || die "--lite and --quick are mutually exclusive"
@@ -2719,12 +1585,7 @@ cmd_create() {
     shift
   done
 
-  # Headless drives the pipeline in-process (no tmux); the session flow needs tmux.
-  if [ "$headless" -eq 1 ]; then
-    require_cmds gh jq claude
-  else
-    require_cmds gh jq tmux claude
-  fi
+  require_cmds gh jq claude
   local repo_main
   repo_main="$(safe_repo_main "$repo")"
 
@@ -2739,165 +1600,80 @@ cmd_create() {
   root="$(spec_root "$repo")"
   dir="$(spec_dir "$repo" "$slug")"
 
-  mkdir -p "$dir/plans"
-  mkdir -p "$dir/recon"
-  mkdir -p "$dir/images"
+  mkdir -p "$dir/plans" "$dir/recon" "$dir/images"
 
-  # Concurrency guard: refuse a second headless run for the same spec while one
-  # is live (they would clobber each other's recon/plan artifacts and log). Done
-  # before any GitHub side effect so a rejected run posts no duplicate comment.
-  if [ "$headless" -eq 1 ] && [ -f "$dir/pipeline.pid" ]; then
+  # Concurrency guard: refuse a second run for the same spec while one is live
+  # (they would clobber each other's recon/plan artifacts and log). Done before
+  # any GitHub side effect so a rejected run posts no duplicate comment.
+  if [ -f "$dir/pipeline.pid" ]; then
     local existing_pid
     existing_pid="$(cat "$dir/pipeline.pid" 2>/dev/null || true)"
     if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
-      die "A headless pipeline is already running for this spec (pid $existing_pid). Wait for it, or 'acorn clean $repo $slug' to stop it."
+      die "A pipeline is already running for this spec (pid $existing_pid). Wait for it, or 'acorn clean $repo $slug' to stop it."
     fi
     rm -f "$dir/pipeline.pid"  # stale pid file from a previous run
   fi
 
-  # Decide whether to (re)generate PROMPT.md. A pre-existing PROMPT.md is only
-  # safe to reuse if its flavor matches the requested mode: headless wants a lean
-  # (methodology-free) prompt, the session flow needs the methodology block. A
-  # mismatch (e.g. a lean PROMPT.md left by an earlier --headless run, then a
-  # plain `acorn create`) would silently feed the wrong instructions to the
-  # pipeline, so regenerate instead of "leaving as-is".
+  # PROMPT.md holds requirements + discussion for the agents to read; the stage
+  # plan is code, not prose. It is mode-independent, so an existing one is always
+  # safe to reuse — regenerate only if missing or if it is a legacy prompt that
+  # still carries the removed planning methodology.
   local prompt_path="$dir/PROMPT.md"
-  local need_generate=0
-  if [ ! -f "$prompt_path" ]; then
-    need_generate=1
-  elif [ "$headless" -eq 1 ]; then
-    if grep -q 'PLANNING METHODOLOGY' "$prompt_path"; then
-      info "Existing PROMPT.md is the session flavor; regenerating lean for --headless"
-      need_generate=1
-    fi
-  else
-    if ! grep -q 'PLANNING METHODOLOGY' "$prompt_path"; then
-      info "Existing PROMPT.md is the headless flavor; regenerating with methodology for the session flow"
-      need_generate=1
-    else
-      # Has methodology, but each mode's methodology differs (6/4/2-stage). If the
-      # existing prompt was generated for a different mode, regenerate — otherwise
-      # the orchestrator would run the wrong stage plan for the requested mode.
-      local existing_mode="full"
-      grep -q 'MANDATORY INSTRUCTIONS (LITE MODE)'  "$prompt_path" && existing_mode="lite"
-      grep -q 'MANDATORY INSTRUCTIONS (QUICK MODE)' "$prompt_path" && existing_mode="quick"
-      if [ "$existing_mode" != "$mode" ]; then
-        info "Existing PROMPT.md is ${existing_mode}-mode; regenerating for ${mode}"
-        need_generate=1
-      fi
-    fi
-  fi
-
-  if [ "$need_generate" -eq 1 ]; then
-    # Extract and download images from issue markdown
+  if [ ! -f "$prompt_path" ] || grep -q 'PLANNING METHODOLOGY' "$prompt_path"; then
     info "Extracting images from issue #$issue_number"
     local url_mapping_file
     url_mapping_file="$(extract_and_download_images "$issue_json" "$dir/images")"
 
     local tmp_path="$prompt_path.tmp"
-    # Headless PROMPT.md omits the planning methodology (the orchestrator is code).
-    local include_methodology=1
-    [ "$headless" -eq 1 ] && include_methodology=0
-    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$mode" "$dir" "$url_mapping_file" "$include_methodology"
-    if [ "$headless" -eq 1 ]; then
-      if ! validate_prompt_md_lean "$tmp_path"; then
-        rm -f "$tmp_path" "$url_mapping_file"
-        die "Prompt generation failed: requirements section missing"
-      fi
-    else
-      if ! validate_prompt_md "$tmp_path"; then
-        rm -f "$tmp_path" "$url_mapping_file"
-        die "Prompt generation failed: planning anchor missing"
-      fi
+    render_prompt_md "$title" "$body" "$issue_json" "$tmp_path" "$url_mapping_file"
+    if ! validate_prompt_md_lean "$tmp_path"; then
+      rm -f "$tmp_path" "$url_mapping_file"
+      die "Prompt generation failed: requirements section missing"
     fi
-    # (Interpolation-drift guard now lives inside render_prompt_md, scoped to the
-    # methodology block so it never trips on untrusted issue text.)
     mv "$tmp_path" "$prompt_path"
     rm -f "$url_mapping_file"
     info "Generated $prompt_path"
   else
-    info "PROMPT.md already exists (matches mode), leaving as-is"
+    info "PROMPT.md already exists, leaving as-is"
   fi
 
   ensure_labels "$repo_main"
   set_issue_state_label "$repo_main" "$issue_number" "spec-in-progress"
-
   comment_issue "$repo_main" "$issue_number" "Spec started locally at: $dir"
 
-  local meta_path="$dir/meta.json"
+  write_meta_json "$dir/meta.json" "$repo" "$issue_number" "$title" "$slug" "$mode"
 
-  if [ "$headless" -eq 1 ]; then
-    write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "headless" "" "$mode"
-    local logf="$dir/pipeline.log" pidf="$dir/pipeline.pid"
-    : > "$logf"
-    # Run detached so the terminal is free during long (full-mode) runs. Capture
-    # the exit with `|| rc=$?`: `set -e` would otherwise abort the recorder the
-    # moment the nested pipeline subshell fails, before PIPELINE_EXIT is logged,
-    # making a failed run indistinguishable from a still-running one. The pid
-    # file lets `acorn clean` stop an in-flight run and guards concurrent runs.
-    (
-      rc=0
-      ( run_pipeline "$mode" "$dir" "$repo_main" ) >> "$logf" 2>&1 || rc=$?
-      printf 'PIPELINE_EXIT=%s\n' "$rc" >> "$logf"
-      rm -f "$pidf"
-    ) &
-    local bg_pid=$!
-    printf '%s\n' "$bg_pid" > "$pidf"
-    disown
+  if [ "$run_now" -eq 0 ]; then
     echo ""
-    echo "Created spec: $dir"
-    echo "Mode: $mode (headless, running in background, pid $bg_pid)"
-    echo "Log:  $logf"
-    echo "Follow: tail -f \"$logf\""
-    echo "Spec will land at: $dir/plans/SPEC.md"
-    echo "When done: acorn spec-complete $repo $slug"
+    local mode_flag=""
+    [ "$mode" != "full" ] && mode_flag=" --$mode"
+    echo "Created spec: $dir  (mode: $mode)"
+    echo "Prepared but not run (--no-run). Launch it with: acorn create $repo $issue_number${mode_flag}"
     return 0
   fi
 
-  local session_name
-  session_name=""
-
-  if [ -f "$meta_path" ]; then
-    session_name="$(jq -r '.session_name // ""' "$meta_path" 2>/dev/null || true)"
-  fi
-
-  local alive=0
-  local started_new_session=0
-  if [ -n "$session_name" ] && command -v tmux >/dev/null 2>&1; then
-    if tmux has-session -t "$session_name" 2>/dev/null; then
-      alive=1
-    fi
-  fi
-
-  if [ "$alive" -eq 0 ]; then
-    local session_result
-    session_result="$(start_session "$repo" "$slug" "$dir" "$auto_trigger")"
-    session_name="$(printf '%s' "$session_result" | tail -n1)"
-    started_new_session=1
-
-    if [ "$auto_trigger" -eq 1 ]; then
-      send_auto_trigger "$session_name" "$(auto_trigger_message "$dir" "$mode")"
-      info "Auto-trigger queued (waiting for readiness, up to ~30s)"
-    fi
-  fi
-
-  write_meta_json "$meta_path" "$repo" "$issue_number" "$title" "$slug" "tmux" "$session_name" "$mode"
+  local logf="$dir/pipeline.log" pidf="$dir/pipeline.pid"
+  : > "$logf"
+  # Run the pipeline detached so the terminal is free during long (full-mode)
+  # runs. `|| rc=$?` captures the exit without `set -e` aborting the recorder
+  # before it logs PIPELINE_EXIT, so a failed run is distinguishable from a
+  # still-running one. The pid file lets `acorn clean` stop an in-flight run.
+  (
+    rc=0
+    ( run_pipeline "$mode" "$dir" "$repo_main" ) >> "$logf" 2>&1 || rc=$?
+    printf 'PIPELINE_EXIT=%s\n' "$rc" >> "$logf"
+    rm -f "$pidf"
+  ) &
+  local bg_pid=$!
+  printf '%s\n' "$bg_pid" > "$pidf"
+  disown
 
   echo ""
-  echo "Created spec: $dir"
-  echo "Mode: $mode"
-  echo "Session: $session_name"
-  echo "Attach: tmux attach -t $session_name"
-  if [ "$auto_trigger" -eq 1 ]; then
-    if [ "$started_new_session" -eq 1 ]; then
-      echo "Auto-trigger: waiting for Claude Code to be ready (up to ~30s)"
-    else
-      echo "Auto-trigger: skipped (session already running)"
-    fi
-  else
-    echo "Auto-trigger: disabled (--no-auto)"
-    echo "Manual trigger: say \"let's draft this\" in the planning session"
-  fi
+  echo "Created spec: $dir  (mode: $mode, running in background, pid $bg_pid)"
+  echo "Log:    $logf"
+  echo "Follow: tail -f \"$logf\""
+  echo "Spec lands at: $dir/plans/SPEC.md"
+  echo "When done: acorn spec-complete $repo $slug"
 }
 
 cmd_list() {
@@ -3061,16 +1837,8 @@ cmd_clean() {
     esac
   fi
 
-  local backend="" session_name=""
-  if [ -f "$target/meta.json" ]; then
-    backend="$(jq -r '.session_backend // ""' "$target/meta.json" 2>/dev/null || true)"
-    session_name="$(jq -r '.session_name // ""' "$target/meta.json" 2>/dev/null || true)"
-  fi
-
-  kill_session "$backend" "$session_name" "$repo" "$slug"
-
-  # Stop an in-flight headless pipeline before deleting its directory, otherwise
-  # its agents keep running until they fail on the vanished artifact paths.
+  # Stop an in-flight pipeline before deleting its directory, otherwise its
+  # agents keep running until they fail on the vanished artifact paths.
   if [ -f "$target/pipeline.pid" ]; then
     local run_pid
     run_pid="$(cat "$target/pipeline.pid" 2>/dev/null || true)"
@@ -3822,7 +2590,7 @@ cmd_issue_plan() {
   local blocked_by=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --no-auto|--lite|--quick)
+      --no-run|--lite|--quick)
         create_flags+=("$1")
         shift
         ;;

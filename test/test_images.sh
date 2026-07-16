@@ -397,38 +397,24 @@ test_extract_and_download_images() {
 # Tests: VISUAL ASSETS in planning blocks
 # ─────────────────────────────────────────────────
 
-test_visual_assets_in_planning_blocks() {
-  printf '\n\033[1m== VISUAL ASSETS in planning blocks ==\033[0m\n'
+test_visual_assets_in_recon_prompt() {
+  printf '\n\033[1m== VISUAL ASSETS in recon prompt ==\033[0m\n'
 
-  local count
-  count="$(grep -c "VISUAL ASSETS" "$ACORN_SCRIPT")"
-  assert_eq "$count" "3" \
-    "VISUAL ASSETS appears exactly 3 times in bin/acorn"
-
-  count="$(grep -c "If __SPEC_PATH__/images/ exists" "$ACORN_SCRIPT")"
-  assert_eq "$count" "3" \
-    "image examination bullet appears exactly 3 times"
-
-  # Verify __SPEC_PATH__ gets substituted in each mode
+  # The architecture recon agent is told to examine downloaded images.
   local output
-
-  output="$(planning_block_full "/test/my-spec")"
-  assert_contains "$output" "/test/my-spec/images/" \
-    "full mode: __SPEC_PATH__ substituted in image instruction"
+  output="$(recon_prompt architecture "/test/my-spec")"
   assert_contains "$output" "VISUAL ASSETS" \
-    "full mode: VISUAL ASSETS preamble present"
-
-  output="$(planning_block_lite "/test/my-spec")"
+    "architecture recon: VISUAL ASSETS instruction present"
   assert_contains "$output" "/test/my-spec/images/" \
-    "lite mode: __SPEC_PATH__ substituted in image instruction"
-  assert_contains "$output" "VISUAL ASSETS" \
-    "lite mode: VISUAL ASSETS preamble present"
+    "architecture recon: spec_dir/images path referenced"
 
-  output="$(planning_block_quick "/test/my-spec")"
-  assert_contains "$output" "/test/my-spec/images/" \
-    "quick mode: __SPEC_PATH__ substituted in image instruction"
-  assert_contains "$output" "VISUAL ASSETS" \
-    "quick mode: VISUAL ASSETS preamble present"
+  # Other facets don't carry the image instruction.
+  output="$(recon_prompt conventions "/test/my-spec")"
+  if printf '%s' "$output" | grep -q "VISUAL ASSETS"; then
+    fail "conventions recon lacks image instruction" "unexpectedly present"
+  else
+    pass "conventions recon lacks image instruction"
+  fi
 }
 
 # ─────────────────────────────────────────────────
@@ -529,13 +515,11 @@ EOF
   assert_not_contains "$prompt_content" "$image_url" \
     "integration: original URL rewritten (not in PROMPT.md)"
 
-  # Check PROMPT.md still has the planning methodology anchor
-  assert_contains "$prompt_content" "PLANNING METHODOLOGY" \
-    "integration: PROMPT.md has planning methodology block"
-
-  # Check PROMPT.md has VISUAL ASSETS instruction
-  assert_contains "$prompt_content" "VISUAL ASSETS" \
-    "integration: PROMPT.md has VISUAL ASSETS instruction"
+  # Check PROMPT.md is the lean requirements doc (methodology is code now)
+  assert_contains "$prompt_content" "## Requirements" \
+    "integration: PROMPT.md has requirements section"
+  assert_not_contains "$prompt_content" "PLANNING METHODOLOGY" \
+    "integration: PROMPT.md has no planning methodology prose"
 
   # ── Cleanup ──
   printf '  Cleaning up...\n'
@@ -572,7 +556,7 @@ test_generate_image_filename
 test_extract_image_urls
 test_rewrite_image_urls_in_text
 test_extract_and_download_images
-test_visual_assets_in_planning_blocks
+test_visual_assets_in_recon_prompt
 
 if [ "$INTEGRATION" = "1" ]; then
   test_integration_acorn_create_with_image

@@ -136,7 +136,7 @@ Before executing anything, show the user the full plan:
 
 1. The wave-ordered list with mode assignments and reasoning
 2. Whether this is spec-only or spec + implementation
-3. Estimated parallel sessions (how many specs will run concurrently)
+3. Estimated concurrency (how many spec pipelines will run in the background at once)
 4. Any concerns (cycles, underspecified issues, issues that might need splitting)
 
 Wait for the user to confirm or adjust. They might want to change a mode, reorder things, or drop an issue.
@@ -156,14 +156,17 @@ After launching a wave, move to monitoring.
 
 ## Step 6: Monitor Progress
 
-Use `acorn status <repo>` to check on running sessions. Report progress to the user periodically:
+Each `acorn create` runs its pipeline headlessly in a detached background process. Use `acorn status <repo>` to check the RUN column (`running` / `done` / `failed` / `stopped` / `idle`) and report progress to the user periodically:
 
 ```bash
 acorn status <repo>
 ```
 
-For more detail on a specific session, check what's been produced:
+For more detail on a specific pipeline, follow its log or check what's been produced:
 ```bash
+# Follow the pipeline log
+tail -f ~/Projects/<repo>/main/.specs/<slug>/pipeline.log
+
 # Check if recon is done
 ls ~/Projects/<repo>/main/.specs/<slug>/recon/
 
@@ -171,11 +174,11 @@ ls ~/Projects/<repo>/main/.specs/<slug>/recon/
 ls ~/Projects/<repo>/main/.specs/<slug>/plans/SPEC.md
 ```
 
-A spec is ready when `plans/SPEC.md` has landed (the `ls` check above). Do NOT wait for the status to read `review` — `acorn create` stamps the issue `spec-in-progress` and nothing auto-advances it, so a finished spec sits at `spec-in-progress` until a human runs `acorn spec-complete` (which moves it to `spec-review`). Treat the presence of `plans/SPEC.md`, or a `spec-review`/`spec-approved` label, as the done signal. When all specs in a wave are done, report the wave as complete and start the next wave.
+A spec is ready when `plans/SPEC.md` has landed (the `ls` check above), or when `acorn status` shows RUN `done`. Do NOT wait for the status to read `review` — `acorn create` stamps the issue `spec-in-progress` and nothing auto-advances it, so a finished spec sits at `spec-in-progress` until a human runs `acorn spec-complete` (which moves it to `spec-review`). Treat the presence of `plans/SPEC.md`, a RUN `done`, or a `spec-review`/`spec-approved` label, as the done signal. When all specs in a wave are done, report the wave as complete and start the next wave.
 
-If a session dies or gets stuck, tell the user and suggest options:
+If a pipeline fails or gets stuck (RUN shows `failed`/`stopped`, or the log stalls), tell the user and suggest options:
+- Follow the log to see where it stopped: `tail -f ~/Projects/<repo>/main/.specs/<slug>/pipeline.log`
 - Re-run with `acorn clean <repo> <slug> --yes && acorn create <repo> <issue#> [--mode]`
-- Attach to debug: `tmux attach -t <session-name>`
 
 ## Step 7: Review Checkpoint
 

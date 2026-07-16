@@ -70,23 +70,18 @@ test_prompt_builders() {
 }
 
 # ──────────────────────────────────────
-# render_prompt_md lean mode (include_methodology=0)
+# render_prompt_md (lean: requirements + discussion only, no methodology)
 # ──────────────────────────────────────
 test_lean_prompt_md() {
-  printf '\n\033[1m== lean PROMPT.md ==\033[0m\n'
+  printf '\n\033[1m== PROMPT.md (lean) ==\033[0m\n'
   local out; out="$(mktemp)"
-  render_prompt_md "My feature" "Do the thing." '{}' "$out" quick /tmp/x "" 0
-  assert_file_contains "lean has Requirements"     "$out" "## Requirements"
-  if grep -q 'PLANNING METHODOLOGY' "$out"; then fail "lean omits methodology" "anchor present"; else pass "lean omits methodology"; fi
+  render_prompt_md "My feature" "Do the thing." '{}' "$out" ""
+  assert_file_contains "has Requirements"        "$out" "## Requirements"
+  assert_file_contains "includes issue body"     "$out" "Do the thing."
+  assert_file_contains "has Completion Protocol"  "$out" "## Completion Protocol"
+  if grep -q 'PLANNING METHODOLOGY' "$out"; then fail "no methodology prose" "anchor present"; else pass "no methodology prose"; fi
   if validate_prompt_md_lean "$out"; then pass "validate_lean accepts"; else fail "validate_lean accepts" "rejected a valid lean prompt"; fi
-  if validate_prompt_md "$out" 2>/dev/null; then fail "full validator rejects lean" "accepted"; else pass "full validator rejects lean"; fi
   rm -f "$out"
-
-  # Full mode still emits the methodology anchor
-  local full; full="$(mktemp)"
-  render_prompt_md "My feature" "Do the thing." '{}' "$full" quick /tmp/x "" 1
-  assert_file_contains "full keeps methodology" "$full" "PLANNING METHODOLOGY"
-  rm -f "$full"
 }
 
 # ──────────────────────────────────────
@@ -211,27 +206,6 @@ test_quick_recon_failure() {
   rm -rf "$spec" "$repo"
 }
 
-# ──────────────────────────────────────
-# sed interpolation safety: ACORN_PANEL_* with sed metachars must not corrupt
-# ──────────────────────────────────────
-test_sed_escape() {
-  printf '\n\033[1m== sed_rep_escape + planning-block interpolation ==\033[0m\n'
-  assert_eq "escapes ampersand" "$(sed_rep_escape 'a&b')" 'a\&b'
-  assert_eq "escapes pipe"      "$(sed_rep_escape 'a|b')" 'a\|b'
-  assert_eq "escapes backslash" "$(sed_rep_escape 'a\b')" 'a\\b'
-
-  # A panel override containing '&' must render literally, not expand to the token.
-  local out
-  out="$(ACORN_PANEL_full_recon='x&y' ACORN_CODEX=0 planning_block full /tmp/s 2>/dev/null)"
-  assert_contains "ampersand override renders literally" "$out" 'Use model "x&y"'
-  assert_not_contains "no residual model token" "$out" '__MODEL_RECON__'
-
-  # A '|' (the sed delimiter) in an override must not break rendering.
-  local ec=0
-  ( ACORN_PANEL_full_recon='a|b' ACORN_CODEX=0 planning_block full /tmp/s >/dev/null 2>&1 ) || ec=$?
-  [ "$ec" -eq 0 ] && pass "pipe override does not break sed" || fail "pipe override does not break sed" "render errored"
-}
-
 test_prompt_builders
 test_lean_prompt_md
 test_dispatcher
@@ -239,7 +213,6 @@ test_quick_orchestration
 test_lite_orchestration
 test_full_orchestration
 test_quick_recon_failure
-test_sed_escape
 
 printf '\n\033[1mResults: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

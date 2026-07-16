@@ -30,7 +30,7 @@ You have a vague idea — "we need better error handling" or "add dark mode". Th
 
 ### Issue to Spec
 
-You have a well-defined GitHub issue. `acorn create` fetches it, downloads any images, and launches a multi-agent planning pipeline that produces `SPEC.md`.
+You have a well-defined GitHub issue. `acorn create` fetches it, downloads any images, and runs a multi-agent planning pipeline headlessly in the background that produces `SPEC.md`.
 
 ```
 acorn create myapp 42 [--lite | --quick]
@@ -61,14 +61,15 @@ GitHub Issue
 acorn create <repo> <issue#> [--lite | --quick]
     |-- Fetches issue (title, body, comments)
     |-- Downloads any images from the issue to .specs/<slug>/images/
-    |-- Generates PROMPT.md with requirements + planning methodology
+    |-- Generates a lean PROMPT.md with requirements + discussion
     |   (image URLs rewritten to local paths for agent visibility)
     |-- Sets GitHub label: spec-in-progress
     |-- (Issues created via `acorn issue create` start at `triage`)
-    |-- Starts a detached Claude Code session in tmux
+    |-- Runs the pipeline headlessly in the background,
+    |   logging to .specs/<slug>/pipeline.log
     |
     v
-Multi-Agent Planning (mode-dependent)
+Multi-Agent Planning (mode-dependent; acorn shells out to claude -p / codex exec)
     |
     v
 acorn approve <repo> <slug>
@@ -84,19 +85,19 @@ Install these before using Acorn:
 |------------|---------|---------|
 | **gh** | GitHub CLI — fetches issues, manages labels, posts comments | `brew install gh` then `gh auth login` |
 | **jq** | JSON parsing | `brew install jq` |
-| **tmux** | Session management for detached agent sessions | `brew install tmux` |
-| **claude** | Claude Code CLI — runs the planning pipeline | See [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) |
+| **claude** | Claude Code CLI — runs the planning pipeline (`claude -p`) | See [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) |
+| **codex** | Codex CLI — runs `gpt-*` panel entries (soft dependency; falls back to Claude if absent) | See Codex CLI docs, then `codex login` |
 | **curl** | Downloads images from GitHub issues | Pre-installed on macOS and most Linux |
 
-On Linux, replace `brew install` with your package manager (e.g., `apt install gh jq tmux`).
+On Linux, replace `brew install` with your package manager (e.g., `apt install gh jq`).
 
 ### Verify dependencies
 
 ```bash
 gh --version
 jq --version
-tmux -V
 claude --version
+codex --version   # optional; enables real Codex agents in the pipeline
 ```
 
 ### GitHub authentication
@@ -184,7 +185,7 @@ ls -la ~/.claude/skills/acorn-*
 Acorn is designed to work alongside cashew's `dev` session manager:
 
 - **Project layout**: Both use `~/Projects/<repo>/main/` (auto-detects `~/Projects` or `~/projects`)
-- **Sessions**: Acorn creates tmux sessions named `<repo>_specs_<slug>_claude` — these show up in `dev` session listings
+- **Background pipelines**: Acorn runs each spec pipeline as a detached background process (logged to `.specs/<slug>/pipeline.log`), so it doesn't tie up a terminal or a `dev` session
 - **No conflicts**: Acorn's `.specs/` directory lives inside `main/` and doesn't interfere with cashew worktrees
 
 ## Claude Code Skills
@@ -210,8 +211,10 @@ Acorn expects your projects to live at `~/Projects/<repo>/main/` (or `~/projects
     main/              <-- repo checkout (acorn operates here)
       .specs/          <-- created by acorn
         42-add-auth/
-          PROMPT.md    <-- generated requirements + planning methodology
-          meta.json    <-- metadata (repo, issue, session info, mode)
+          PROMPT.md    <-- lean requirements + discussion for agents to Read
+          meta.json    <-- metadata (repo, issue_number, issue_title, slug, created_at, mode)
+          pipeline.log <-- background pipeline output (tail -f to follow)
+          pipeline.pid <-- pid of the running pipeline (used by status / clean)
           images/      <-- downloaded images from the GitHub issue
             <hash>.png   (auto-downloaded, referenced in PROMPT.md)
           recon/                        Full  Lite  Quick
@@ -246,24 +249,26 @@ acorn create myapp 42 --quick
 This will:
 1. Fetch issue #42 from the `myapp` repo
 2. Generate a slug (e.g., `42-add-authentication`)
-3. Create `.specs/42-add-authentication/PROMPT.md` with full requirements and planning instructions
+3. Create `.specs/42-add-authentication/PROMPT.md` with the lean requirements + discussion
 4. Create lifecycle labels on the repo if they don't exist
 5. Set the issue label to `spec-in-progress`
 6. Post a comment on the issue with the spec location
-7. Start a detached tmux session with Claude Code
-8. Automatically trigger the planning pipeline once Claude Code is ready
+7. Run the planning pipeline headlessly in a detached background process (acorn shells out to `claude -p` and `codex exec` for each stage), logging to `.specs/42-add-authentication/pipeline.log`
 
-Monitor or attach anytime:
+`acorn create` returns immediately; the pipeline keeps running in the background. Monitor it anytime:
 
 ```bash
-# Attach to the session (session name is printed by acorn create)
-tmux attach -t <session-name>
+# Follow the pipeline log
+tail -f ~/Projects/myapp/main/.specs/42-add-authentication/pipeline.log
+
+# Check run-state across all specs
+acorn status
 ```
 
-To opt out of auto-triggering:
+To prepare the spec (PROMPT.md + labels) without launching the pipeline:
 
 ```bash
-acorn create myapp 42 --no-auto
+acorn create myapp 42 --no-run
 ```
 
 ### List all specs
@@ -285,10 +290,10 @@ Output shows repo, issue number, slug, status, mode, age, clarification status, 
   - `review` — plans/SPEC.md exists, ready for human review
   - `unknown` — spec directory exists but state is unclear
 
-### Session dashboard
+### Pipeline dashboard
 
 ```bash
-# Show session status across all repos
+# Show pipeline run-state across all repos
 acorn status
 
 # Filter to a specific repo
@@ -301,10 +306,10 @@ Output columns:
 |--------|-------------|
 | REPO | Repository name |
 | SLUG | Issue slug (e.g., `42-add-authentication`) |
-| SESSION | `running`, `dead`, or `no-session` |
-| BACKEND | `tmux` for the session flow, or `headless` for `--headless` runs (which have no attachable session; SESSION shows `n/a`) |
+| RUN | Pipeline run-state: `running`, `done`, `failed`, `stopped`, or `idle` (derived from `pipeline.pid` being alive and `PIPELINE_EXIT` in `pipeline.log`) |
 | STATUS | Lifecycle status label (or legacy fallback: `planning`/`review`/`unknown`) |
-| ATTACH | Command to attach to a running session |
+| MODE | Pipeline mode (`full`/`lite`/`quick`) |
+| SPEC | Whether `plans/SPEC.md` exists yet |
 
 ### Mark a spec as ready for review
 
@@ -342,7 +347,7 @@ acorn clean myapp 42-add-authentication --remove-labels --yes
 acorn clean myapp 42-add-authentication --force --yes
 ```
 
-This kills the associated tmux session and deletes the spec directory.
+This stops any in-flight pipeline (it kills the pid recorded in `pipeline.pid`) and deletes the spec directory.
 
 **Safety check:** If `plans/SPEC.md` exists and the GitHub issue is still open, `clean` will refuse to delete the spec directory — this prevents accidental loss of generated specs before implementation. Use `--force` to override.
 
@@ -476,17 +481,17 @@ These are orthogonal to lifecycle labels and indicate issue clarification status
 
 ## How the Planning Pipeline Works
 
-The `PROMPT.md` generated by Acorn contains embedded instructions for the planning methodology (mode-dependent). When Claude Code reads it and you say "let's draft this", it orchestrates the pipeline.
+The stage plan lives in `bin/acorn` as code, not as prose in `PROMPT.md`. When you run `acorn create`, acorn itself drives each stage headlessly, shelling out to `claude -p` and `codex exec` in parallel and writing artifacts to `recon/*.md` and `plans/*.md`, ending at `plans/SPEC.md`. `PROMPT.md` is kept lean: just the requirements and discussion each agent reads.
 
 ### Full Pipeline (default)
 
 6 stages, 14 sub-agent launches:
 
 0. **Stage 0 — Codebase Reconnaissance**: 3 Sonnet sub-agents explore the actual codebase from different angles (architecture, relevant code, conventions)
-1. **Stage 1 — Diverse Parallel Drafting**: 4 sub-agents each independently draft a complete implementation plan with a distinct architectural lens, each on a different model for genuine diversity (Minimal Surgery, Clean Architecture → Opus; Robustness-First → Sonnet; Developer Experience → Fable)
-2. **Stage 2 — Rubric-Based Evaluation**: 1 Opus sub-agent scores all 4 drafts against a structured rubric
-3. **Stage 3 — Weighted Synthesis**: 1 Opus sub-agent synthesizes a master plan using scored drafts
-4. **Stage 4 — Adversarial Red Team**: 4 sub-agents each attack the master plan from a different angle, spread across models (Opus, Sonnet, Fable)
+1. **Stage 1 — Diverse Parallel Drafting**: 4 agents each independently draft a complete implementation plan with a distinct architectural lens, spread across vendors and models for genuine diversity (Codex, Opus, Sonnet, Fable per the model panel)
+2. **Stage 2 — Rubric-Based Evaluation**: 1 Opus agent scores all 4 drafts against a structured rubric
+3. **Stage 3 — Weighted Synthesis**: 1 Opus agent synthesizes a master plan using scored drafts
+4. **Stage 4 — Adversarial Red Team**: 4 agents each attack the master plan from a different angle, spread across vendors and models (Codex, Opus, Sonnet, Fable)
 5. **Stage 5 — Final Spec**: 1 Fable sub-agent produces `plans/SPEC.md` with traceability matrix and red team resolution log (the final deliverable runs on Anthropic's most capable model)
 
 ### Lite Pipeline (`--lite`)
@@ -507,7 +512,7 @@ The `PROMPT.md` generated by Acorn contains embedded instructions for the planni
 
 ### Orchestrator Design
 
-The orchestrator agent's only job is to launch sub-agents and confirm completion — it never writes plan content itself. This keeps its own context window clean while each sub-agent works in its own fresh context.
+Acorn itself is the orchestrator: `bin/acorn` launches each stage's agents (via `claude -p` / `codex exec`), waits for them, and moves to the next stage. No agent writes the stage plan or coordinates the others; each agent works in its own fresh context and only produces its artifact.
 
 ### Model panel
 
@@ -520,9 +525,9 @@ ACORN_PANEL_full_recon=haiku      acorn create myapp 42     # cheaper recon
 ACORN_PANEL_full_draft_dx=opus    acorn create myapp 42     # all-Opus drafters
 ```
 
-**Model surface.** Claude tiers use their aliases (`fable`, `sonnet`, `opus`, `haiku`) or full names (`claude-fable-5`); these auto-track the latest model in each family. Codex/GPT models (`gpt-5.6-sol`, `gpt-5.3-codex-spark`, or the `spark` alias) route through the Codex CLI.
+**Model surface.** Claude tiers use their aliases (`fable`, `sonnet`, `opus`, `haiku`) or full names (`claude-fable-5`); these auto-track the latest model in each family. Codex/GPT models (`gpt-5.6-sol`, `gpt-5.3-codex-spark`, or the `spark` alias) route through the Codex CLI as real Codex agents in the pipeline (drafters and red-teamers spread across Codex, Opus, Sonnet, and Fable for genuine cross-vendor diversity).
 
-**Codex is a soft dependency.** The panel includes Codex entries for cross-vendor diversity, but the interactive pipeline currently runs on Claude Code's Task tool, which can only launch Claude models, so Codex entries fall back to Claude (`ACORN_CODEX_FALLBACK`, default `opus`) in that path today. The `acorn issue split` analysis and any future headless orchestration call Codex directly when it is installed and authenticated (`codex login`). If Codex is unavailable, those calls degrade to the Claude fallback with a warning; set `ACORN_STRICT_PANEL=1` to make a missing Codex a hard error instead, or `ACORN_CODEX=0` to force Claude-only.
+**Codex is a soft dependency.** The pipeline runs `gpt-*` panel entries as real Codex agents (acorn shells out to `codex exec`), so those stages genuinely run on Codex when the CLI is installed and authenticated (`codex login`). If the codex CLI is absent or unauthed, those entries degrade to a Claude fallback (`ACORN_CODEX_FALLBACK`, default `opus`) with a warning and the pipeline continues. Set `ACORN_STRICT_PANEL=1` to make a missing Codex a hard error instead, or `ACORN_CODEX=0` to force Claude-only.
 
 ### Image Extraction
 
@@ -541,16 +546,17 @@ If a download fails, the original remote URL is preserved in PROMPT.md and the p
 ## Command Reference
 
 ```
-acorn create <repo> <issue-number> [--no-auto] [--lite | --quick]
-    Create a spec from a GitHub issue, start a planning session, and auto-trigger planning
+acorn create <repo> <issue-number> [--no-run] [--lite | --quick]
+    Create a spec from a GitHub issue and run the planning pipeline headlessly in the background
     --lite    Use lite 4-stage pipeline (6 agents, Sonnet recon)
     --quick   Use quick 2-stage pipeline (4 agents, Sonnet recon)
+    --no-run  Prepare the spec (PROMPT.md + labels) without launching the pipeline
 
 acorn list [repo]
     List all specs and their status (optionally filtered by repo)
 
 acorn status [repo]
-    Show session dashboard — running/dead status, backend, and attach commands
+    Show pipeline dashboard (run-state, mode, and whether SPEC.md exists)
 
 acorn approve <repo> <slug>
     Approve a completed spec for implementation
@@ -559,12 +565,12 @@ acorn spec-complete <repo> <slug>
     Mark a completed SPEC.md as ready for review (`spec-review`)
 
 acorn clean <repo> <slug> [--remove-labels] [--yes] [--force]
-    Remove a spec directory and kill its session (refuses if SPEC.md exists and issue is open; use --force to override)
+    Stop any in-flight pipeline and remove the spec directory (refuses if SPEC.md exists and issue is open; use --force to override)
 
 acorn issue create <repo> <title> [options]
     Create a new GitHub issue
 
-acorn issue plan <repo> <title> [options] [--no-auto] [--lite | --quick]
+acorn issue plan <repo> <title> [options] [--no-run] [--lite | --quick]
     Create a GitHub issue and immediately start spec creation
 
 acorn issue clarify <repo> <issue-number>
@@ -585,7 +591,6 @@ acorn issue split <repo> <issue-number> [--yes] [--model <model>]
 # Run unit tests (no network calls to GitHub API)
 bash test/test_images.sh
 bash test/test_labels.sh
-bash test/test_auto_trigger.sh
 bash test/test_split.sh
 bash test/test_dependencies.sh
 bash test/test_run_agent.sh
@@ -611,11 +616,11 @@ Acorn expects your repo at `~/Projects/<repo>/main/` (or `~/projects/<repo>/main
 **"Failed to fetch issue #42"**
 Make sure `gh` is authenticated and has access to the repo. Run `gh auth status` and check `gh issue view 42` from within the repo.
 
-**Session doesn't start**
-Ensure tmux is installed (`brew install tmux`).
+**Pipeline doesn't produce SPEC.md**
+Follow the log to see where it stopped: `tail -f ~/Projects/<repo>/main/.specs/<slug>/pipeline.log`. Check run-state with `acorn status`. To re-run from scratch, clean first: `acorn clean <repo> <slug> --force --yes` then re-run create.
 
 **PROMPT.md already exists**
 `acorn create` is idempotent — it won't overwrite an existing PROMPT.md. To regenerate, clean first: `acorn clean <repo> <slug> --force --yes` then re-run create.
 
-**Auto-trigger doesn't fire**
-The auto-trigger waits for Claude Code to be ready (polling for the prompt character) before sending the planning prompt via tmux. If it times out, attach to the session and send the trigger manually: say "let's draft this".
+**Codex entries fell back to Claude**
+If the `codex` CLI is missing or unauthenticated, `gpt-*` panel entries degrade to the Claude fallback (`ACORN_CODEX_FALLBACK`, default `opus`) with a warning. Install and authenticate Codex (`codex login`) to run them for real, set `ACORN_STRICT_PANEL=1` to make it a hard error, or `ACORN_CODEX=0` to force Claude-only.
